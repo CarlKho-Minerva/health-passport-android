@@ -4,6 +4,8 @@
 
 **Health Passport** is a privacy-first Android application that turns your phone into a structured medical records system. Query your prescriptions conversationally, browse your health timeline, and manage medical documents — all with on-device AI inference using NexaSDK on Qualcomm Hexagon NPU.
 
+[![Health Passport demo](https://img.youtube.com/vi/2JNhoXNvsCo/maxresdefault.jpg)](https://www.youtube.com/watch?v=2JNhoXNvsCo)
+
 ## 🎯 The Problem
 
 **As a Minerva student, I rotate across seven global cities every semester.** Manila → Mumbai → Taipei → San Francisco. Each new country means re-explaining my complete medical history: astigmatism prescription, active medications (Omega-3, allergy meds), past procedures. My prescriptions are camera roll photos. My lab reports are PDFs in three languages (English, Mandarin, Tagalog). When a doctor in Hyderabad asks "What's your medication history?", I'm scrolling through 500+ unstructured images.
