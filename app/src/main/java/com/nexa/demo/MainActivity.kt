@@ -305,6 +305,10 @@ class MainActivity : FragmentActivity() {
             toggleAdvancedMode()
             true
         }
+        // Tap privacy badge for settings, long-press for advanced mode
+        tvPrivacyBadge.setOnClickListener {
+            showSettingsDialog()
+        }
         tvPrivacyBadge.setOnLongClickListener {
             toggleAdvancedMode()
             true
@@ -538,13 +542,13 @@ class MainActivity : FragmentActivity() {
 
         // Keyword → file mapping for targeted retrieval
         val keywordMap = mapOf(
-            listOf("eye", "vision", "glasses", "optical", "myop", "astigmat", "sight", "prescription") to "01_Body_Systems/01_Head_Eyes_ENT.md",
+            listOf("eye", "vision", "glasses", "optical", "myop", "astigmat", "sight", "prescription", "lens") to "01_Body_Systems/01_Head_Eyes_ENT.md",
             listOf("heart", "cardio", "blood pressure", "bp", "pulse", "cholesterol") to "01_Body_Systems/02_Cardiovascular_Heart.md",
             listOf("arm", "leg", "bone", "joint", "ortho", "fracture", "limb") to "01_Body_Systems/03_Limbs_Ortho.md",
             listOf("neuro", "brain", "psych", "mental", "anxiety", "depression", "headache") to "01_Body_Systems/06_Neuro_Psych.md",
-            listOf("lab", "blood test", "cbc", "lipid", "glucose", "baseline") to "01_Body_Systems/00_Lab_Baselines.md",
-            listOf("med", "drug", "pill", "taking", "medication", "dose") to "03_Protocols/Active_Medications.md",
-            listOf("timeline", "history", "when", "visit", "appointment", "date") to "02_Timeline/Medical_Timeline.md"
+            listOf("lab", "blood test", "cbc", "lipid", "glucose", "baseline", "test result") to "01_Body_Systems/00_Lab_Baselines.md",
+            listOf("med", "drug", "pill", "taking", "medication", "dose", "supplement") to "03_Protocols/Active_Medications.md",
+            listOf("timeline", "history", "when", "visit", "appointment", "date", "past") to "02_Timeline/Medical_Timeline.md"
         )
 
         // Find matching files
@@ -555,24 +559,35 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        // If no specific match, include summary files
+        // If no specific keyword match, include ALL vault files for broad coverage
         if (relevantFiles.isEmpty()) {
-            val defaultFiles = listOf(
+            val allVaultFiles = listOf(
+                "01_Body_Systems/01_Head_Eyes_ENT.md",
+                "01_Body_Systems/02_Cardiovascular_Heart.md",
+                "01_Body_Systems/03_Limbs_Ortho.md",
+                "01_Body_Systems/06_Neuro_Psych.md",
+                "01_Body_Systems/00_Lab_Baselines.md",
                 "02_Timeline/Medical_Timeline.md",
-                "03_Protocols/Active_Medications.md",
-                "01_Body_Systems/01_Head_Eyes_ENT.md"
+                "03_Protocols/Active_Medications.md"
             )
-            for (path in defaultFiles) {
+            for (path in allVaultFiles) {
                 val file = File(healthVaultDir, path)
                 if (file.exists()) relevantFiles.add(file)
             }
+            // Also include any scanned health records
+            val recordsDir = File(filesDir, "health_records")
+            if (recordsDir.exists()) {
+                recordsDir.listFiles()?.sortedByDescending { it.lastModified() }?.take(3)?.forEach {
+                    relevantFiles.add(it)
+                }
+            }
         }
 
-        // Read file contents, limit to ~4000 chars total for rich context
+        // Read file contents, limit to ~6000 chars total for rich context
         val contextBuilder = StringBuilder()
         contextBuilder.append("--- HEALTH VAULT CONTEXT ---\n")
         var totalChars = 0
-        val maxChars = 4000
+        val maxChars = 6000
 
         for (file in relevantFiles) {
             if (totalChars >= maxChars) break
@@ -642,7 +657,14 @@ Answer based ONLY on the health records above. If the records don't contain rele
     }
 
     private fun autoLoadEssentialModels() {
-        // Auto-load LLM if not already loaded
+        // Auto-load all essential models (LLM + OCR + ASR) in sequence
+        val modelsToLoad = essentialModelIds.mapNotNull { id ->
+            modelList.firstOrNull { it.id == id }?.let { model ->
+                if (isModelDownloaded(model) == null) model else null
+            }
+        }
+
+        // Load LLM first (most important)
         val llmModel = modelList.firstOrNull { it.id == "Qwen3-4B-Instruct-NPU" }
         if (llmModel != null && !isLoadLlmModel && isModelDownloaded(llmModel) == null) {
             selectModelId = llmModel.id
@@ -650,6 +672,27 @@ Answer based ONLY on the health records above. If the records don't contain rele
             if (pos >= 0) spModelList.setSelection(pos)
             btnLoadModel.performClick()
         }
+
+        // Load OCR and ASR after a delay to let LLM finish
+        Handler(Looper.getMainLooper()).postDelayed({
+            val ocrModel = modelList.firstOrNull { it.id == "paddleocr-npu" }
+            if (ocrModel != null && !isLoadCVModel && isModelDownloaded(ocrModel) == null) {
+                selectModelId = ocrModel.id
+                val pos = modelList.indexOfFirst { it.id == selectModelId }
+                if (pos >= 0) spModelList.setSelection(pos)
+                btnLoadModel.performClick()
+            }
+        }, 8000)
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            val asrModel = modelList.firstOrNull { it.id == "parakeet-tdt-npu" }
+            if (asrModel != null && !isLoadAsrModel && isModelDownloaded(asrModel) == null) {
+                selectModelId = asrModel.id
+                val pos = modelList.indexOfFirst { it.id == selectModelId }
+                if (pos >= 0) spModelList.setSelection(pos)
+                btnLoadModel.performClick()
+            }
+        }, 16000)
     }
 
     private fun showSetupModal(missingModels: List<ModelData>) {
@@ -1071,34 +1114,21 @@ ___
         initNexaSdk()
         //
         val sysPrompt = """\
-You are Health Passport, an on-device medical document scanner AI. You analyze photos of medical documents (lab reports, prescriptions, receipts, X-rays) and extract structured health data.
+You are Health Passport, an on-device medical assistant. You have access to the patient's health records stored locally on this phone, including body system files, medication lists, lab results, and medical timeline.
 
-When a user sends you an image of a medical document, you must:
+When the user asks a health question:
+1. Search all available health records for relevant information
+2. Answer based on the records you have access to
+3. If records contain relevant data, cite specifics (dates, values, medications)
+4. If records don't cover the topic, say "Your health vault doesn't have records about this yet"
+
+When the user sends an image of a medical document:
 1. Identify the document type (lab_report, prescription, receipt, xray, other)
 2. Extract key findings in a structured format
 3. List any medications with dosage and frequency
 4. Identify action items (follow-up appointments, refills, tests)
 
-Output format:
-## Document Type: [type]
-## Date: [date if visible]
-## Facility: [facility name if visible]
-
-### Findings
-| Test | Result | Reference Range | Status |
-|------|--------|-----------------|--------|
-[extracted findings]
-
-### Medications
-- [Drug name] - [Dosage] - [Frequency] - [Purpose]
-
-### Action Items
-- [ ] [Next steps identified from the document]
-
-### Notes
-[Any additional observations]
-
-IMPORTANT: All processing happens on-device. No data is sent to any server. This ensures complete medical data privacy and HIPAA compliance.
+Keep responses concise and conversational. Use minimal markdown (bold for emphasis, no headers in chat). All processing happens on-device — no data leaves this phone.
 """
         // Use the full detailed prompt for both VLM and LLM
         addSystemPrompt(sysPrompt)
@@ -1191,9 +1221,9 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 "${modelData?.displayName ?: selectModelId} · Ready"
             }
 
-            // Enable UI features based on ALL loaded models (not just the latest)
-            btnAddImage.visibility = if (isLoadVlmModel || isLoadCVModel) View.VISIBLE else View.INVISIBLE
-            btnAudioRecord.visibility = if (isLoadVlmModel || isLoadAsrModel) View.VISIBLE else View.INVISIBLE
+            // Scan button always visible — routes to OCR/VLM if loaded, else guidance
+            btnAddImage.visibility = View.VISIBLE
+            btnAudioRecord.visibility = if (isLoadAsrModel) View.VISIBLE else View.GONE
             btnUnloadModel.visibility = View.VISIBLE
             llLoading.visibility = View.INVISIBLE
             // Stop button works for LLM/VLM streaming
@@ -1226,9 +1256,9 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 Toast.makeText(this@MainActivity, "Load failed: $tip", Toast.LENGTH_LONG).show()
             }
 
-            // change UI
-            btnAddImage.visibility = View.INVISIBLE
-            btnAudioRecord.visibility = View.INVISIBLE
+            // change UI — keep scan always visible
+            btnAddImage.visibility = View.VISIBLE
+            btnAudioRecord.visibility = View.GONE
             btnUnloadModel.visibility = View.GONE
             llLoading.visibility = View.INVISIBLE
         }
@@ -1472,7 +1502,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     if (isLoadVlmModel) { try { vlmWrapper.stopStream(); vlmWrapper.destroy(); vlmChatList.clear() } catch (_: Exception) {} }
                     isLoadVlmModel = false
                 }
-                "paddleocr" -> {
+                "paddleocr", "cv" -> {
                     if (isLoadCVModel) { try { cvWrapper.destroy() } catch (_: Exception) {} }
                     isLoadCVModel = false
                 }
@@ -1584,7 +1614,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
                 }
 
-                "paddleocr" -> {
+                "paddleocr", "cv" -> {
                     // paddleocr-npu
                     val cvCreateInput = CVCreateInput(
                         model_name = nexaManifestBean?.ModelName ?: "",
@@ -2051,15 +2081,40 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         container.addView(header)
 
         val subtitle = TextView(this).apply {
-            text = "Multi-model: load LLM + OCR together for full pipeline"
+            text = "Multi-model: load LLM + OCR + ASR together for full pipeline"
             setTextColor(Color.parseColor("#808080"))
             textSize = 12f
             setPadding(0, dp(4), 0, dp(12))
         }
         container.addView(subtitle)
 
-        // Model list
-        for (model in modelList) {
+        // Group models by type
+        val typeOrder = listOf("chat", "llm", "multimodal", "vlm", "paddleocr", "asr", "embedder", "reranker")
+        val typeGroups = mapOf(
+            "LLM" to modelList.filter { it.type == "chat" || it.type == "llm" },
+            "Vision (VLM)" to modelList.filter { it.type == "multimodal" || it.type == "vlm" },
+            "OCR" to modelList.filter { it.type == "paddleocr" },
+            "Speech (ASR)" to modelList.filter { it.type == "asr" },
+            "Embedder" to modelList.filter { it.type == "embedder" },
+            "Reranker" to modelList.filter { it.type == "reranker" }
+        )
+
+        for ((groupName, models) in typeGroups) {
+            if (models.isEmpty()) continue
+
+            // Section header
+            val sectionHeader = TextView(this).apply {
+                text = groupName.uppercase()
+                setTextColor(Color.parseColor("#4D4D4D"))
+                textSize = 10f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                letterSpacing = 0.1f
+                setPadding(dp(4), dp(12), 0, dp(4))
+            }
+            container.addView(sectionHeader)
+
+        // Model list within group
+        for (model in models) {
             val isDownloaded = isModelDownloaded(model) == null
             // Multi-model: check if THIS specific model type is loaded
             val isLoaded = when (model.type) {
@@ -2205,6 +2260,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             card.addView(actionBtn)
             container.addView(card)
         }
+        } // end typeGroups loop
 
         // Close button
         val closeBtn = Button(this).apply {
@@ -2246,11 +2302,18 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         }
 
         // Quick-action buttons (always visible)
+        findViewById<Button>(R.id.btn_scan_quick).setOnClickListener {
+            showPopupMenu(it)
+        }
         findViewById<Button>(R.id.btn_vault_quick).setOnClickListener {
             browseHealthFiles()
         }
-        findViewById<Button>(R.id.btn_settings_quick).setOnClickListener {
-            showSettingsDialog()
+        findViewById<Button>(R.id.btn_voice_quick).setOnClickListener {
+            if (isLoadAsrModel) {
+                startRecord()
+            } else {
+                Toast.makeText(this, "Voice model loading... please wait", Toast.LENGTH_SHORT).show()
+            }
         }
 
         /**
@@ -2816,8 +2879,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     vTip.visibility = View.GONE
                     btnUnloadModel.visibility = View.GONE
                     btnStop.visibility = View.GONE
-                    btnAddImage.visibility = View.INVISIBLE
-                    btnAudioRecord.visibility = View.INVISIBLE
+                    btnAddImage.visibility = View.VISIBLE
+                    btnAudioRecord.visibility = View.GONE
 
                     // Update status
                     tvModelStatus.text = "No model loaded - Select model file in advanced mode"
@@ -3485,11 +3548,13 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             file.writeText(content)
 
             Log.d(TAG, "Health record saved: ${file.absolutePath}")
-            Toast.makeText(
-                this,
-                "✓ Saved to health records",
-                Toast.LENGTH_SHORT
-            ).show()
+            runOnUiThread {
+                Toast.makeText(
+                    this,
+                    "✓ Saved to health records",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving health record", e)
         }

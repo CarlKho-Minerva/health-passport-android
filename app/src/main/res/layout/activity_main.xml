@@ -108,7 +108,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:visibility="visible"
+            android:visibility="gone"
             android:paddingLeft="16dp"
             android:paddingRight="16dp"
             android:paddingTop="8dp"
@@ -335,6 +335,20 @@
                     android:paddingBottom="4dp">
 
                     <Button
+                        android:id="@+id/btn_scan_quick"
+                        android:layout_width="0dp"
+                        android:layout_height="34dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:paddingLeft="12dp"
+                        android:paddingRight="12dp"
+                        android:background="@drawable/btn_rounded_border"
+                        android:text="Scan"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp" />
+
+                    <Button
                         android:id="@+id/btn_vault_quick"
                         android:layout_width="0dp"
                         android:layout_height="34dp"
@@ -349,14 +363,14 @@
                         android:textSize="12sp" />
 
                     <Button
-                        android:id="@+id/btn_settings_quick"
+                        android:id="@+id/btn_voice_quick"
                         android:layout_width="0dp"
                         android:layout_height="34dp"
                         android:layout_weight="1"
                         android:paddingLeft="12dp"
                         android:paddingRight="12dp"
                         android:background="@drawable/btn_rounded_border"
-                        android:text="Settings"
+                        android:text="Voice"
                         android:textAllCaps="false"
                         android:textColor="@color/text_primary"
                         android:textSize="12sp" />
