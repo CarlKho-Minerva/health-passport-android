@@ -294,7 +294,7 @@ fun ModelData.getSupportPluginIds(): ArrayList<String> {
  * - ".nexa" suffix in modelName
  */
 fun ModelData.isNpuModel(): Boolean {
-    return id.contains("NPU", ignoreCase = true) || 
+    return id.contains("NPU", ignoreCase = true) ||
            id.contains("npu", ignoreCase = true) ||
            modelName.endsWith(".nexa", ignoreCase = true) ||
            (!baseUrl.isNullOrEmpty() && files.isNullOrEmpty())
@@ -353,7 +353,7 @@ fun ModelData.downloadableFilesWithFallback(
             if (baseUrl.endsWith("/")) "$baseUrl$fileName" else "$baseUrl/$fileName"
         }
         val hfUrl = ModelFileListingUtil.getHfDownloadUrl(repoId, fileName)
-        
+
         // If useHfUrls is true, swap primary and fallback
         if (useHfUrls) {
             npuFiles.add(DownloadableFileWithFallback(File(modelDir, fileName), hfUrl, s3Url))

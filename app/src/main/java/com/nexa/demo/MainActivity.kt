@@ -1342,6 +1342,11 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             val nexaManifestBean = selectModelData.getNexaManifest(this@MainActivity)
             val pluginId = nexaManifestBean?.PluginId ?: modelDataPluginId
 
+            // Safe model path: for NPU directory-based models, modelFile() is null
+            // (no modelUrl), so fall back to model directory path
+            val safeModelPath = selectModelData.modelFile(this@MainActivity)?.absolutePath
+                ?: selectModelData.modelDir(this@MainActivity).absolutePath
+
             when (nexaManifestBean?.ModelType ?: selectModelData.type) {
                 "chat", "llm" -> {
 
@@ -1356,7 +1361,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     LlmWrapper.builder().llmCreateInput(
                         LlmCreateInput(
                             model_name = nexaManifestBean?.ModelName ?: "",
-                            model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                            model_path = safeModelPath,
                             tokenizer_path = selectModelData.tokenFile(this@MainActivity)?.absolutePath,
                             config = conf,
                             plugin_id = pluginId
@@ -1377,7 +1382,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     val embedderCreateInput = EmbedderCreateInput(
                         model_name = nexaManifestBean?.ModelName
                             ?: "",  // Model name for NPU plugin
-                        model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                        model_path = safeModelPath,
                         tokenizer_path = selectModelData.tokenFile(this@MainActivity)?.absolutePath,
                         config = ModelConfig(
                             npu_lib_folder_path = applicationInfo.nativeLibraryDir,
@@ -1406,7 +1411,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     val rerankerCreateInput = RerankerCreateInput(
                         model_name = nexaManifestBean?.ModelName
                             ?: "",  // Model name for NPU plugin
-                        model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                        model_path = safeModelPath,
                         tokenizer_path = selectModelData.tokenFile(this@MainActivity)?.absolutePath,
                         config = ModelConfig(
                             npu_lib_folder_path = applicationInfo.nativeLibraryDir,
@@ -1436,7 +1441,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         config = CVModelConfig(
                             capabilities = CVCapability.OCR,
                             det_model_path = selectModelData.modelDir(this@MainActivity).absolutePath,
-                            rec_model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                            rec_model_path = safeModelPath,
                             char_dict_path = selectModelData.modelDir(this@MainActivity).absolutePath,
                             npu_model_folder_path = selectModelData.modelDir(this@MainActivity).absolutePath,
                             npu_lib_folder_path = applicationInfo.nativeLibraryDir
@@ -1459,7 +1464,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     // parakeet-tdt-0.6b-v3-npu
                     val asrCreateInput = AsrCreateInput(
                         model_name = nexaManifestBean?.ModelName ?: "",
-                        model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                        model_path = safeModelPath,
                         config = ModelConfig(
                             npu_lib_folder_path = applicationInfo.nativeLibraryDir,
                             npu_model_folder_path = selectModelData.modelDir(this@MainActivity).absolutePath,
@@ -1503,7 +1508,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
                     val vlmCreateInput = VlmCreateInput(
                         model_name = nexaManifestBean?.ModelName ?: "",
-                        model_path = selectModelData.modelFile(this@MainActivity)!!.absolutePath,
+                        model_path = safeModelPath,
                         mmproj_path = selectModelData.mmprojTokenFile(this@MainActivity)?.absolutePath,
                         config = config,
                         plugin_id = pluginId
