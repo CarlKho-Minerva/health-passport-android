@@ -97,41 +97,50 @@ The user never picks which model to use. The app routes automatically based on w
 
 ## Architecture Diagram
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                      User Interface                       │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌─────────┐ │
-│  │  Text Box │  │  Camera  │  │   Audio   │  │  Vault  │ │
-│  └─────┬────┘  └────┬─────┘  └─────┬─────┘  │ Browser │ │
-│        │             │              │         └─────────┘ │
-├────────┼─────────────┼──────────────┼────────────────────┤
-│        ▼             ▼              ▼                     │
-│   ┌─────────── Smart Pipeline Router ──────────────┐     │
-│   │                                                 │     │
-│   │  text?  ──→ RAG Lookup → LLM                   │     │
-│   │  image? ──→ OCR → Save → LLM  or  VLM          │     │
-│   │  audio? ──→ ASR → RAG → LLM                    │     │
-│   │                                                 │     │
-│   └─────────────────────────────────────────────────┘     │
-│                          │                                │
-├──────────────────────────┼────────────────────────────────┤
-│          NPU Inference Layer (Snapdragon 8 Elite)         │
-│                                                           │
-│  ┌──────────┐ ┌────────┐ ┌─────┐ ┌─────┐ ┌───────────┐  │
-│  │ Qwen3-4B │ │PaddleOC│ │ ASR │ │ VLM │ │ EmbedGemma│  │
-│  │  (LLM)   │ │  (OCR) │ │     │ │     │ │  (Embed)  │  │
-│  └──────────┘ └────────┘ └─────┘ └─────┘ └───────────┘  │
-│                                                           │
-├───────────────────────────────────────────────────────────┤
-│           Health Vault (On-Device File System)            │
-│                                                           │
-│  health_vault/          health_records/                   │
-│  ├── eyes.md            ├── scan_2026-02-15_1423.md       │
-│  ├── medications.md     ├── scan_2026-02-16_0901.md       │
-│  ├── allergies.md       └── ...                           │
-│  ├── conditions.md                                        │
-│  └── ...                                                  │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph UI["User Interface"]
+        TEXT["Text Box"]
+        CAM["Camera"]
+        MIC["Audio"]
+        VAULT["Vault Browser"]
+    end
+
+    subgraph ROUTER["Smart Pipeline Router"]
+        R1["text → RAG Lookup → LLM"]
+        R2["image → OCR → Save → LLM"]
+        R3["image → VLM → Analysis"]
+        R4["audio → ASR → RAG → LLM"]
+    end
+
+    subgraph NPU["NPU Inference · Snapdragon 8 Elite"]
+        QWEN["Qwen3-4B · LLM"]
+        POCR["PaddleOCR · OCR"]
+        PASR["Parakeet · ASR"]
+        OVLM["OmniNeural · VLM"]
+        GEMMA["EmbedGemma · Embed"]
+    end
+
+    subgraph STORAGE["Health Vault · On-Device File System"]
+        HV["health_vault/<br/>eyes.md, medications.md, allergies.md"]
+        HR["health_records/<br/>scan_2026-02-15.md, ..."]
+    end
+
+    TEXT --> R1
+    CAM --> R2
+    CAM --> R3
+    MIC --> R4
+
+    R1 --> QWEN
+    R2 --> POCR
+    R2 --> QWEN
+    R3 --> OVLM
+    R4 --> PASR
+    R4 --> QWEN
+
+    QWEN --> STORAGE
+    POCR --> STORAGE
+    STORAGE --> QWEN
 ```
 
 ---

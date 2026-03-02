@@ -54,7 +54,7 @@ object ModelFileListingUtil {
 
     /**
      * Extracts repo name from S3 URL.
-     * 
+     *
      * Examples:
      * - https://...../embeddinggemma-300m-npu-mobile/ -> embeddinggemma-300m-npu-mobile
      * - https://...../LFM2-1.2B-GGUF/LFM2-1.2B-Q4_0.gguf -> LFM2-1.2B-GGUF
@@ -63,9 +63,9 @@ object ModelFileListingUtil {
         val path = s3Url.removePrefix("https://").removePrefix("http://")
             .substringAfter("/")  // Remove host
             .trimEnd('/')
-        
+
         val segments = path.split("/").filter { it.isNotEmpty() }
-        
+
         // Check if last segment is a file (has extension)
         return if (segments.isNotEmpty()) {
             val lastSegment = segments.last()
@@ -200,7 +200,7 @@ object ModelFileListingUtil {
 
     /**
      * Lists all files from a Hugging Face repository.
-     * 
+     *
      * @param repoId HF repo ID (e.g., "NexaAI/embeddinggemma-300m-npu-mobile")
      * @param client OkHttpClient instance
      * @return List of file names in the repository
@@ -289,7 +289,7 @@ object ModelFileListingUtil {
                 val item = jsonArray.getJSONObject(i)
                 val type = item.optString("type", "")
                 val path = item.optString("path", "")
-                
+
                 // Only include files, not directories
                 if (type == "file" && path.isNotEmpty()) {
                     files.add(path)
@@ -303,7 +303,7 @@ object ModelFileListingUtil {
 
     /**
      * Builds downloadable file entries with both S3 and HF fallback URLs.
-     * 
+     *
      * @param baseUrl S3 base URL
      * @param fileNames List of file names to download
      * @return List of DownloadableFileWithFallback entries
@@ -323,7 +323,7 @@ object ModelFileListingUtil {
     /**
      * Gets the HF download URL for a specific .gguf file from its S3 URL.
      * Used for non-NPU models that have direct file URLs.
-     * 
+     *
      * @param s3FileUrl Full S3 URL to the .gguf file
      * @return HF download URL for the same file
      */

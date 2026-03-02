@@ -120,6 +120,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -612,106 +613,221 @@ Answer based ONLY on the health records above. If the records don't contain rele
     /**
      * Show intro modal on launch (unless user has dismissed it)
      */
-    private fun checkFirstLaunch() {
-        val prefs = getSharedPreferences("health_passport", MODE_PRIVATE)
-        val dontShowAgain = prefs.getBoolean("dont_show_intro", false)
+    // Essential models for the core pipeline (LLM + OCR + ASR)
+    private val essentialModelIds = listOf(
+        "Qwen3-4B-Instruct-NPU",   // Brain — text Q&A
+        "paddleocr-npu",            // Scanner — document OCR
+        "parakeet-tdt-npu"          // Voice — speech-to-text
+    )
 
-        if (!dontShowAgain) {
-            // Show intro modal after a brief delay
+    private fun checkFirstLaunch() {
+        // Check which essential models are missing
+        val missingModels = essentialModelIds.mapNotNull { id ->
+            modelList.firstOrNull { it.id == id }?.let { model ->
+                if (isModelDownloaded(model) != null) model else null
+            }
+        }
+
+        if (missingModels.isNotEmpty()) {
+            // Show setup modal and auto-download
             Handler(Looper.getMainLooper()).postDelayed({
-                showIntroModal()
+                showSetupModal(missingModels)
             }, 600)
+        } else {
+            // All essential models present — auto-load the LLM
+            Handler(Looper.getMainLooper()).postDelayed({
+                autoLoadEssentialModels()
+            }, 400)
         }
     }
 
-    private fun showIntroModal() {
+    private fun autoLoadEssentialModels() {
+        // Auto-load LLM if not already loaded
+        val llmModel = modelList.firstOrNull { it.id == "Qwen3-4B-Instruct-NPU" }
+        if (llmModel != null && !isLoadLlmModel && isModelDownloaded(llmModel) == null) {
+            selectModelId = llmModel.id
+            val pos = modelList.indexOfFirst { it.id == selectModelId }
+            if (pos >= 0) spModelList.setSelection(pos)
+            btnLoadModel.performClick()
+        }
+    }
+
+    private fun showSetupModal(missingModels: List<ModelData>) {
         val sheet = BottomSheetDialog(this, R.style.DarkBottomSheetDialog)
+        sheet.setCancelable(false)
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#0D0D0D"))
-            setPadding(dp(24), dp(20), dp(24), dp(24))
+            setPadding(dp(24), dp(24), dp(24), dp(24))
         }
 
         // Header
         val header = TextView(this).apply {
             text = "Welcome to Health Passport"
             setTextColor(Color.parseColor("#F2F2F2"))
-            textSize = 18f
+            textSize = 20f
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             letterSpacing = -0.02f
-            setPadding(0, 0, 0, dp(16))
+            setPadding(0, 0, 0, dp(8))
         }
         container.addView(header)
 
-        // Content
-        val content = TextView(this).apply {
-            text = """Your medical records deserve privacy. This app runs AI inference entirely on-device using the Qualcomm Hexagon NPU — no data leaves your phone.
-
-What you can do:
-
-• Scan Documents — Tap the scan area to capture prescriptions, lab reports, or medical receipts. The on-device VLM extracts data and organizes it into your Health Vault.
-
-• Browse Your Vault — Tap "Health Vault" to explore your records by body system, timeline, or protocol. Everything is structured markdown, locally stored.
-
-• Ask Questions — Type queries like "What's my current eye prescription?" or "List my active medications." The app searches your vault and responds conversationally.
-
-• Privacy by Design — No server, no cloud, no breach surface. All processing happens on your device via NexaSDK."""
-            setTextColor(Color.parseColor("#B0B0B0"))
+        val subtitle = TextView(this).apply {
+            text = "Your medical records, privately on your phone.\nNo internet needed after setup."
+            setTextColor(Color.parseColor("#808080"))
             textSize = 13f
-            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
-            setLineSpacing(0f, 1.4f)
-            letterSpacing = -0.01f
+            setLineSpacing(0f, 1.3f)
             setPadding(0, 0, 0, dp(20))
         }
-        container.addView(content)
+        container.addView(subtitle)
 
-        // Checkbox for "Don't show this again"
-        val checkboxContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(16))
-        }
-
-        val checkbox = android.widget.CheckBox(this).apply {
-            text = "Don't show this again"
-            setTextColor(Color.parseColor("#808080"))
-            textSize = 12f
-            buttonTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#10B981"))
-        }
-        checkboxContainer.addView(checkbox)
-        container.addView(checkboxContainer)
-
-        // Got it button
-        val btnGotIt = Button(this).apply {
-            text = "Got it"
-            setTextColor(Color.parseColor("#FFFFFF"))
+        // Status text
+        val statusText = TextView(this).apply {
+            text = "Installing ${missingModels.size} AI component${if (missingModels.size > 1) "s" else ""}..."
+            setTextColor(Color.parseColor("#10B981"))
             textSize = 14f
-            isAllCaps = false
-            setBackgroundResource(R.drawable.btn_send_accent)
-            setPadding(dp(20), dp(12), dp(20), dp(12))
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setPadding(0, 0, 0, dp(12))
+        }
+        container.addView(statusText)
+
+        // Progress bar
+        val progressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(44)
-            )
-            setOnClickListener {
-                if (checkbox.isChecked) {
-                    val prefs = getSharedPreferences("health_passport", MODE_PRIVATE)
-                    prefs.edit().putBoolean("dont_show_intro", true).apply()
-                }
-                sheet.dismiss()
-            }
+                dp(6)
+            ).also { it.bottomMargin = dp(8) }
+            max = missingModels.size * 100
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#10B981"))
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#1A1A1A"))
         }
-        container.addView(btnGotIt)
+        container.addView(progressBar)
+
+        // Current item text
+        val currentItem = TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#4D4D4D"))
+            textSize = 11f
+            setPadding(0, 0, 0, dp(16))
+        }
+        container.addView(currentItem)
+
+        // Privacy note
+        val privacyNote = TextView(this).apply {
+            text = "Everything runs on-device. Your data never leaves this phone."
+            setTextColor(Color.parseColor("#4D4D4D"))
+            textSize = 11f
+            setPadding(0, dp(8), 0, 0)
+        }
+        container.addView(privacyNote)
 
         sheet.setContentView(container)
         sheet.window?.navigationBarColor = Color.parseColor("#0D0D0D")
-        sheet.setCancelable(true)
         sheet.setOnShowListener {
             val bottomSheet = sheet.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
             bottomSheet?.setBackgroundColor(Color.parseColor("#0D0D0D"))
         }
         sheet.show()
+
+        // Start sequential download of missing models
+        modelScope.launch {
+            var completedCount = 0
+            for (model in missingModels) {
+                withContext(Dispatchers.Main) {
+                    val label = when (model.type) {
+                        "chat", "llm" -> "Language model"
+                        "paddleocr" -> "Document scanner"
+                        "asr" -> "Voice recognition"
+                        "multimodal", "vlm" -> "Vision model"
+                        "embedder" -> "Memory model"
+                        else -> model.displayName
+                    }
+                    currentItem.text = "Installing: $label"
+                    statusText.text = "Installing ${completedCount + 1} of ${missingModels.size}..."
+                }
+
+                // Download this model and wait for completion
+                val success = downloadModelSuspend(model) { percent ->
+                    runOnUiThread {
+                        progressBar.progress = completedCount * 100 + percent
+                    }
+                }
+
+                completedCount++
+                if (!success) {
+                    withContext(Dispatchers.Main) {
+                        currentItem.text = "Failed to install ${model.displayName}. You can retry from Models."
+                        currentItem.setTextColor(Color.parseColor("#EF4444"))
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                statusText.text = "Ready"
+                statusText.setTextColor(Color.parseColor("#10B981"))
+                currentItem.text = "Setup complete. Tap to start."
+                currentItem.setTextColor(Color.parseColor("#808080"))
+                progressBar.progress = progressBar.max
+
+                // Replace progress with a done button
+                val btnStart = Button(this@MainActivity).apply {
+                    text = "Start"
+                    setTextColor(Color.parseColor("#FFFFFF"))
+                    textSize = 14f
+                    isAllCaps = false
+                    setBackgroundResource(R.drawable.btn_send_accent)
+                    setPadding(dp(20), dp(12), dp(20), dp(12))
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(44)
+                    ).also { it.topMargin = dp(12) }
+                    setOnClickListener {
+                        sheet.dismiss()
+                        autoLoadEssentialModels()
+                    }
+                }
+                container.addView(btnStart)
+                sheet.setCancelable(true)
+            }
+        }
     }
+
+    /**
+     * Suspending download that waits for completion.
+     * Used by the setup modal to download models sequentially.
+     * Reuses the existing downloadModel() and polls for completion.
+     */
+    private suspend fun downloadModelSuspend(
+        model: ModelData,
+        onProgress: (Int) -> Unit
+    ): Boolean {
+        // Skip if already downloaded
+        if (isModelDownloaded(model) == null) {
+            onProgress(100)
+            return true
+        }
+
+        val completionSignal = kotlinx.coroutines.CompletableDeferred<Boolean>()
+
+        // Store callback for the setup flow
+        setupDownloadCompletion = { success ->
+            completionSignal.complete(success)
+        }
+        setupDownloadProgress = onProgress
+
+        // Trigger the standard download on the main thread
+        withContext(Dispatchers.Main) {
+            downloadModel(model)
+        }
+
+        // Wait for completion
+        return completionSignal.await()
+    }
+
+    // Callbacks for setup flow downloads
+    private var setupDownloadCompletion: ((Boolean) -> Unit)? = null
+    private var setupDownloadProgress: ((Int) -> Unit)? = null
 
     /**
      * Mock scan flow: simulates document processing with progress
@@ -1619,6 +1735,9 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         downloadWakeLock?.let { if (it.isHeld) it.release() }
                         downloadWakeLock = null
                         Toaster.show("Failed to fetch file list.")
+                        setupDownloadCompletion?.invoke(false)
+                        setupDownloadCompletion = null
+                        setupDownloadProgress = null
                     }
                     return@launch
                 }
@@ -1706,6 +1825,9 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     downloadWakeLock?.let { if (it.isHeld) it.release() }
                     downloadWakeLock = null
                     Toaster.show("Download failed - could not get file sizes.")
+                    setupDownloadCompletion?.invoke(false)
+                    setupDownloadCompletion = null
+                    setupDownloadProgress = null
                 }
                 return@launch
             }
@@ -1739,8 +1861,15 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         downloadWakeLock?.let { if (it.isHeld) it.release() }
                         downloadWakeLock = null
                         Toaster.show("${downloadingModelData?.displayName} downloaded")
+                        downloadState = DownloadState.IDLE
+                        // Signal setup flow if active
+                        setupDownloadCompletion?.invoke(true)
+                        setupDownloadCompletion = null
+                        setupDownloadProgress = null
                     } else {
                         tvDownloadProgress.text = "$percent%"
+                        // Forward progress to setup flow if active
+                        setupDownloadProgress?.invoke(percent)
                     }
                 }
             }
@@ -1784,6 +1913,9 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                             downloadWakeLock?.let { if (it.isHeld) it.release() }
                             downloadWakeLock = null
                             Toaster.show("Download failed for some files.")
+                            setupDownloadCompletion?.invoke(false)
+                            setupDownloadCompletion = null
+                            setupDownloadProgress = null
                         }
                     }
                     return
