@@ -200,6 +200,23 @@ class MainActivity : FragmentActivity() {
 
     private var enableThinking = false
 
+    // Think-tag stripping regex for VLM/LLM outputs
+    private val thinkTagRegex = Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL)
+    private val openThinkTagRegex = Regex("<think>.*", RegexOption.DOT_MATCHES_ALL)
+
+    // Track last VLM extraction for cross-model pipeline
+    private var lastVlmExtraction: String? = null
+
+    // Throttle UI updates to prevent screen flickering during streaming
+    private var lastUiUpdateMs = 0L
+    private val UI_UPDATE_INTERVAL_MS = 80L  // ~12 fps, smooth enough without flicker
+
+    // Garbage detection: stop stream if output is degenerate
+    private var lastTokenForRepeatCheck = ""
+    private var repeatTokenCount = 0
+    private val MAX_REPEAT_TOKENS = 8  // Stop after 8 identical consecutive tokens
+    private var streamStopRequested = false
+
     private var wavRecorder: WavRecorder? = null
     private var audioFile: File? = null
 
@@ -550,11 +567,11 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        // Read file contents, limit to ~3000 chars total to stay within context window
+        // Read file contents, limit to ~4000 chars total for rich context
         val contextBuilder = StringBuilder()
         contextBuilder.append("--- HEALTH VAULT CONTEXT ---\n")
         var totalChars = 0
-        val maxChars = 3000
+        val maxChars = 4000
 
         for (file in relevantFiles) {
             if (totalChars >= maxChars) break
@@ -807,38 +824,26 @@ ___
 
     /**
      * Generate a preloaded RAG response for health queries when model isn't loaded.
-     * Searches the health vault and returns contextual answers.
+     * Reads actual health vault files and returns formatted answers.
      */
     private fun handlePreloadedQuery(query: String): Boolean {
         val q = query.lowercase()
+
+        // Try to load actual vault content for the query
+        val vaultContext = loadVaultContext(query)
 
         // Eye-related queries
         if (q.contains("eye") || q.contains("vision") || q.contains("glasses") ||
             q.contains("optical") || q.contains("myop") || q.contains("astigmat") ||
             q.contains("eo ") || q.contains("prescription") || q.contains("sight")) {
 
-            val response = """**Eye Health Summary**
-
-*Active Condition:* Myopic Astigmatism (Confirmed Feb 16, 2026)
-
-*Current Prescription* (Dr. Sarah Chen, Vision Center):
-| Eye | SPH | CYL | AXIS |
-|-----|------|------|------|
-| OD (Right) | -1.25 | -0.50 | 90 |
-| OS (Left) | -1.00 | -0.75 | 85 |
-
-*Recommendation:* Corrective lenses for distance
-
-*Vision Acuity (Feb 2026):* R: 20/25 / L: 20/30 (corrected)
-*IOP:* R: 15 / L: 14 — Normal (Ref: 10-21)
-
-**Rx History:**
-- Jan 2025: OD -1.00/-0.25x95, OS -0.75/-0.50x80
-- Feb 2026: OD -1.25/-0.50x90, OS -1.00/-0.75x85
-
-___
-
-*Source: 01_Body_Systems/01_Head_Eyes_ENT.md · on-device*"""
+            val vaultFile = File(healthVaultDir, "01_Body_Systems/01_Head_Eyes_ENT.md")
+            val vaultContent = try { vaultFile.readText() } catch (e: Exception) { "" }
+            val response = if (vaultContent.isNotBlank()) {
+                "**Eye Health — From Your Vault**\n\n$vaultContent\n\n___\n\n*Source: 01_Head_Eyes_ENT.md · on-device RAG*"
+            } else {
+                "No eye health records found in your vault. Scan an eye exam document to populate this."
+            }
             streamResponseToChat(response)
             return true
         }
@@ -847,21 +852,13 @@ ___
         if (q.contains("med") || q.contains("drug") || q.contains("pill") ||
             q.contains("prescription") || q.contains("taking")) {
 
-            val response = """**Active Medications**
-
-*Daily (Feb 2026):*
-- **Omega-3 Supplement** — 1 softgel with food
-
-*Eye Care:*
-- **Artificial Tears** — As needed (dry eye relief)
-
-*PRN (As Needed):*
-- **Acetaminophen 500mg** — Headaches
-- **Antihistamine** — Seasonal allergies
-
-___
-
-*Source: 03_Protocols/Active_Medications.md · on-device*"""
+            val vaultFile = File(healthVaultDir, "03_Protocols/Active_Medications.md")
+            val vaultContent = try { vaultFile.readText() } catch (e: Exception) { "" }
+            val response = if (vaultContent.isNotBlank()) {
+                "**Active Medications — From Your Vault**\n\n$vaultContent\n\n___\n\n*Source: Active_Medications.md · on-device RAG*"
+            } else {
+                "No medication records found. Scan a prescription to populate this."
+            }
             streamResponseToChat(response)
             return true
         }
@@ -870,21 +867,28 @@ ___
         if (q.contains("timeline") || q.contains("history") || q.contains("when") ||
             q.contains("visit") || q.contains("appointment")) {
 
-            val response = """**Recent Medical Timeline**
+            val vaultFile = File(healthVaultDir, "02_Timeline/Medical_Timeline.md")
+            val vaultContent = try { vaultFile.readText() } catch (e: Exception) { "" }
+            val response = if (vaultContent.isNotBlank()) {
+                "**Medical Timeline — From Your Vault**\n\n$vaultContent\n\n___\n\n*Source: Medical_Timeline.md · on-device RAG*"
+            } else {
+                "No timeline data found. Scan documents to build your medical history."
+            }
+            streamResponseToChat(response)
+            return true
+        }
 
-*2026:*
-- **Feb 16** — Vision exam, myopic astigmatism confirmed, corrective lenses prescribed
-- **Feb 10** — Annual physical, labs ordered, awaiting results
-- **Jan 15** — Dental cleaning, no issues noted
+        // Lab results
+        if (q.contains("lab") || q.contains("blood") || q.contains("test") ||
+            q.contains("cbc") || q.contains("lipid") || q.contains("glucose") || q.contains("baseline")) {
 
-*2025:*
-- **Dec 20** — Vision check, noted gradual prescription change
-- **Nov 05** — General checkup, BP/BMI baseline recorded
-- **Aug 12** — Annual wellness visit
-
-___
-
-*Source: 02_Timeline/Medical_Timeline.md · on-device*"""
+            val vaultFile = File(healthVaultDir, "01_Body_Systems/00_Lab_Baselines.md")
+            val vaultContent = try { vaultFile.readText() } catch (e: Exception) { "" }
+            val response = if (vaultContent.isNotBlank()) {
+                "**Lab Baselines — From Your Vault**\n\n$vaultContent\n\n___\n\n*Source: 00_Lab_Baselines.md · on-device RAG*"
+            } else {
+                "No lab results found. Scan a lab report to populate this."
+            }
             streamResponseToChat(response)
             return true
         }
@@ -893,23 +897,24 @@ ___
         if (q.contains("health") || q.contains("status") || q.contains("summary") ||
             q.contains("how am i") || q.contains("overall")) {
 
-            val response = """**Health Passport — Overview**
-
-*Patient:* Demo User · Age 21 · M
-
-*Key Metrics (Feb 2026):*
-- BMI: 22.5 · BP: 118/75 · Pulse: 70 bpm
-- Labs: All within normal range
-
-*Active Conditions:*
-- Myopic Astigmatism — Rx glasses prescribed
-
-*Vault:* 5 body system files · 6 timeline entries · 4 active medications
-
-___
-
-*All data stored on-device · HIPAA-compliant*"""
-            streamResponseToChat(response)
+            // Gather overview from all vault files
+            val overviewBuilder = StringBuilder("**Health Passport — Overview**\n\n")
+            val vaultFiles = listOf(
+                "01_Body_Systems/00_Lab_Baselines.md" to "Lab Baselines",
+                "01_Body_Systems/01_Head_Eyes_ENT.md" to "Eyes & ENT",
+                "03_Protocols/Active_Medications.md" to "Active Medications",
+                "02_Timeline/Medical_Timeline.md" to "Timeline"
+            )
+            for ((path, label) in vaultFiles) {
+                try {
+                    val content = File(healthVaultDir, path).readText().trim()
+                    if (content.isNotBlank()) {
+                        overviewBuilder.append("### $label\n$content\n\n")
+                    }
+                } catch (_: Exception) {}
+            }
+            overviewBuilder.append("___\n\n*All data stored on-device · HIPAA-compliant*")
+            streamResponseToChat(overviewBuilder.toString())
             return true
         }
 
@@ -979,9 +984,8 @@ Output format:
 
 IMPORTANT: All processing happens on-device. No data is sent to any server. This ensures complete medical data privacy and HIPAA compliance.
 """
-        // Medical extraction prompt for VLM and LLM modes
-        val sysPrompt2 = "You are Health Passport, a medical document scanner. Extract structured health data from images. Output in markdown with tables for findings and lists for medications and action items. Be thorough and precise."
-        addSystemPrompt(sysPrompt2)
+        // Use the full detailed prompt for both VLM and LLM
+        addSystemPrompt(sysPrompt)
 
         // Tutorial pattern: Check for bundled models in assets, then auto-detect pre-placed
         copyBundledModels()
@@ -1051,8 +1055,19 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 this@MainActivity, tip, Toast.LENGTH_SHORT
             ).show()
 
-            // Update status
-            tvModelStatus.text = "Model loaded - Ready"
+            // Update status with loaded model name and type
+            val modelData = modelList.firstOrNull { it.id == selectModelId }
+            val modelTypeLabel = when {
+                isLoadVlmModel -> "VLM"
+                isLoadLlmModel -> "LLM"
+                isLoadCVModel -> "OCR"
+                isLoadAsrModel -> "ASR"
+                isLoadEmbedderModel -> "Embed"
+                isLoadRerankerModel -> "Rerank"
+                else -> "Model"
+            }
+            val displayName = modelData?.displayName ?: selectModelId
+            tvModelStatus.text = "$modelTypeLabel: $displayName · Ready"
 
             // change UI
             btnAddImage.visibility = View.INVISIBLE
@@ -1854,6 +1869,178 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         }
     }
 
+    /**
+     * Show a model picker bottom sheet with all available models.
+     * Shows download status, model type, and quick actions for each model.
+     */
+    private fun showModelPicker() {
+        val sheet = BottomSheetDialog(this, R.style.DarkBottomSheetDialog)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0D0D0D"))
+            setPadding(dp(20), dp(16), dp(20), dp(20))
+        }
+
+        // Header
+        val header = TextView(this).apply {
+            text = "Select Model"
+            setTextColor(Color.parseColor("#F2F2F2"))
+            textSize = 18f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        }
+        container.addView(header)
+
+        val subtitle = TextView(this).apply {
+            text = "Models run entirely on-device via Qualcomm NPU"
+            setTextColor(Color.parseColor("#808080"))
+            textSize = 12f
+            setPadding(0, dp(4), 0, dp(12))
+        }
+        container.addView(subtitle)
+
+        // Model list
+        for (model in modelList) {
+            val isDownloaded = isModelDownloaded(model) == null
+            val isCurrentModel = model.id == selectModelId
+            val isLoaded = isCurrentModel && hasLoadedModel()
+
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setBackgroundColor(if (isLoaded) Color.parseColor("#0A2E1F") else Color.parseColor("#111111"))
+
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                lp.bottomMargin = dp(6)
+                layoutParams = lp
+            }
+
+            // Type emoji indicator
+            val typeEmoji = when (model.type) {
+                "multimodal", "vlm" -> "👁️"
+                "chat", "llm" -> "💬"
+                "paddleocr" -> "📄"
+                "asr" -> "🎙️"
+                "embedder" -> "🔗"
+                "reranker" -> "📊"
+                else -> "🤖"
+            }
+
+            val emojiView = TextView(this).apply {
+                text = typeEmoji
+                textSize = 20f
+                setPadding(0, 0, dp(10), 0)
+            }
+            card.addView(emojiView)
+
+            // Model info column
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val nameView = TextView(this).apply {
+                text = model.displayName
+                setTextColor(Color.parseColor("#F2F2F2"))
+                textSize = 13f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            }
+            infoCol.addView(nameView)
+
+            val statusText = when {
+                isLoaded -> "● Loaded"
+                isDownloaded -> "Downloaded"
+                else -> "Not downloaded"
+            }
+            val statusColor = when {
+                isLoaded -> "#10B981"
+                isDownloaded -> "#808080"
+                else -> "#4D4D4D"
+            }
+            val statusView = TextView(this).apply {
+                text = statusText
+                setTextColor(Color.parseColor(statusColor))
+                textSize = 11f
+            }
+            infoCol.addView(statusView)
+            card.addView(infoCol)
+
+            // Action button
+            val actionBtn = Button(this).apply {
+                val btnLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30))
+                layoutParams = btnLp
+                setPadding(dp(12), 0, dp(12), 0)
+                textSize = 11f
+                isAllCaps = false
+                minimumWidth = 0
+                minWidth = 0
+                minimumHeight = 0
+                minHeight = 0
+
+                when {
+                    isLoaded -> {
+                        text = "Loaded ✓"
+                        setTextColor(Color.parseColor("#10B981"))
+                        setBackgroundColor(Color.TRANSPARENT)
+                        isEnabled = false
+                    }
+                    isDownloaded -> {
+                        text = "Load"
+                        setTextColor(Color.parseColor("#F2F2F2"))
+                        setBackgroundResource(R.drawable.btn_rounded_border)
+                    }
+                    else -> {
+                        text = "Download"
+                        setTextColor(Color.parseColor("#22D3EE"))
+                        setBackgroundResource(R.drawable.btn_rounded_border)
+                    }
+                }
+            }
+
+            actionBtn.setOnClickListener {
+                sheet.dismiss()
+                selectModelId = model.id
+                // Programmatically select in hidden spinner to keep state in sync
+                val pos = modelList.indexOfFirst { it.id == model.id }
+                if (pos >= 0) spModelList.setSelection(pos)
+
+                if (isDownloaded) {
+                    // Load the model
+                    if (hasLoadedModel()) {
+                        Toast.makeText(this, "Please unload current model first", Toast.LENGTH_SHORT).show()
+                    } else {
+                        btnLoadModel.performClick()
+                    }
+                } else {
+                    // Download first
+                    btnDownload.performClick()
+                }
+            }
+
+            card.addView(actionBtn)
+            container.addView(card)
+        }
+
+        // Close button
+        val closeBtn = Button(this).apply {
+            text = "Close"
+            setTextColor(Color.parseColor("#808080"))
+            setBackgroundResource(R.drawable.btn_rounded_border)
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(40))
+            lp.topMargin = dp(12)
+            layoutParams = lp
+        }
+        closeBtn.setOnClickListener { sheet.dismiss() }
+        container.addView(closeBtn)
+
+        sheet.setContentView(container)
+        sheet.show()
+    }
+
     private fun setListeners() {
 
         btnAddImage.setOnClickListener {
@@ -1905,6 +2092,11 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             binding.llDownloading.visibility = View.GONE
         }
         btnDownload.setOnClickListener {
+            // Open model picker for easy model switching
+            showModelPicker()
+        }
+        // Long-press Download to force-download current model
+        btnDownload.setOnLongClickListener {
             // Guard: if spinner was never shown, default to first model
             if (selectModelId.isEmpty() && modelList.isNotEmpty()) {
                 selectModelId = modelList[0].id
@@ -1915,10 +2107,11 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 } else {
                     Toaster.show("${downloadingModelData?.displayName} is currently downloading.")
                 }
-                return@setOnClickListener
+                return@setOnLongClickListener true
             }
             val selectModelData = modelList.first { it.id == selectModelId }
             downloadModel(selectModelData)
+            true
         }
         /**
          * Step 4. load model
@@ -2134,13 +2327,30 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
          * Step 5. send message
          */
         btnSend.setOnClickListener {
-            // If images are captured, trigger mock scan demo
+            // If images are captured but no model loaded → mock scan demo
             if (savedImageFiles.isNotEmpty() && !hasLoadedModel()) {
                 messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
                 reloadRecycleView()
                 clearImages()
                 runMockScanDemo()
                 etInput.setText("")
+                return@setOnClickListener
+            }
+
+            // If images are captured with LLM loaded (not VLM/OCR) → show guidance
+            if (savedImageFiles.isNotEmpty() && hasLoadedModel() && !isLoadVlmModel && !isLoadCVModel) {
+                messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
+                reloadRecycleView()
+                clearImages()
+                etInput.setText("")
+                streamResponseToChat(
+                    "⚠️ **Current model is text-only** (no image processing).\n\n" +
+                    "For document scanning, use:\n" +
+                    "- **PaddleOCR** → extracts text from photos (recommended)\n" +
+                    "- **OmniNeural VLM** → AI vision (experimental)\n\n" +
+                    "Tap **Models** to switch. Your text questions still work!\n\n" +
+                    "*You can also ask about your health records — the vault has your data.*"
+                )
                 return@setOnClickListener
             }
 
@@ -2215,18 +2425,24 @@ space ::= | " " | "\n" | "\r" | "\t"
             }
 
             modelScope.launch {
+                // Reset garbage detection state for new inference
+                lastTokenForRepeatCheck = ""
+                repeatTokenCount = 0
+                streamStopRequested = false
+                lastUiUpdateMs = 0L
+
                 val selectModelData = modelList.first { it.id == selectModelId }
                 val isNpu = selectModelData.getNexaManifest(this@MainActivity)?.PluginId == "npu"
                 Log.d(TAG, "isNpu: $isNpu")
 
                 val sb = StringBuilder()
                 if (isLoadCVModel) {
-                    // FIXME: Temporarily select the last image
+                    // PaddleOCR: extract text from document image
                     if (savedImageFiles.isEmpty()) {
                         runOnUiThread {
                             Toast.makeText(
                                 this@MainActivity,
-                                "Please select one picture.",
+                                "Please capture or select a document image.",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -2236,18 +2452,32 @@ space ::= | " " | "\n" | "\r" | "\t"
                     messages.add(Message("", MessageType.IMAGES, savedImageFiles))
                     reloadRecycleView()
                     clearImages()
-                    cvWrapper.infer(imagePath).onSuccess {
-                        Log.d("nfl", "infer result:$it")
+                    cvWrapper.infer(imagePath).onSuccess { results ->
+                        Log.d("nfl", "infer result:$results")
                         runOnUiThread {
-                            val content = it.map { result ->
-                                "[${result.confidence}] ${result.text}"
-                            }.toList().joinToString(separator = "\n")
+                            // Format OCR results nicely
+                            val ocrLines = results.map { result -> result.text }.toList()
+                            val fullText = ocrLines.joinToString(separator = "\n")
+                            val formattedContent = StringBuilder()
+                            formattedContent.append("**📄 OCR Extraction (PaddleOCR)**\n\n")
+                            formattedContent.append("```\n")
+                            formattedContent.append(fullText)
+                            formattedContent.append("\n```\n\n")
+                            formattedContent.append("*${ocrLines.size} text regions detected · on-device*")
+
+                            val content = formattedContent.toString()
                             messages.add(Message(content, MessageType.ASSISTANT))
                             reloadRecycleView()
+
+                            // Auto-save OCR extraction to health records
+                            if (fullText.isNotBlank()) {
+                                val record = "## OCR Extraction\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$fullText"
+                                saveHealthRecord(record)
+                            }
                         }
                     }.onFailure { error ->
                         runOnUiThread {
-                            messages.add(Message(error.toString(), MessageType.PROFILE))
+                            messages.add(Message("OCR Error: $error", MessageType.PROFILE))
                             reloadRecycleView()
                         }
                         Log.d("nfl", "infer result error:$error")
@@ -2255,23 +2485,24 @@ space ::= | " " | "\n" | "\r" | "\t"
                 } else if (isLoadAsrModel) {
                     if (audioFile == null) {
                         runOnUiThread {
-                            Toast.makeText(this@MainActivity, "no audio file", Toast.LENGTH_SHORT)
+                            Toast.makeText(this@MainActivity, "Record audio first (tap microphone)", Toast.LENGTH_SHORT)
                                 .show()
                         }
                     } else {
-//                        val audioFilePath = audioFile!!.absolutePath
                         val audioFilePath = audioFile!!.absolutePath
                         asrWrapper.transcribe(
                             AsrTranscribeInput(
-                                audioFilePath,  // Use hardcoded path instead of inputString
-                                "en",  // Language code
-                                null   // Optional timestamps
+                                audioFilePath,
+                                "en",
+                                null
                             )
                         ).onSuccess { transcription ->
                             runOnUiThread {
+                                val transcript = transcription.result.transcript ?: ""
+                                val formattedResponse = "**🎙️ Transcription (Parakeet ASR)**\n\n$transcript\n\n*on-device speech recognition*"
                                 messages.add(
                                     Message(
-                                        transcription.result.transcript ?: "",
+                                        formattedResponse,
                                         MessageType.ASSISTANT
                                     )
                                 )
@@ -2281,7 +2512,7 @@ space ::= | " " | "\n" | "\r" | "\t"
                             runOnUiThread {
                                 messages.add(
                                     Message(
-                                        "Error: ${error.message}",
+                                        "ASR Error: ${error.message}",
                                         MessageType.PROFILE
                                     )
                                 )
@@ -2528,44 +2759,105 @@ space ::= | " " | "\n" | "\r" | "\t"
     fun handleResult(sb: StringBuilder, streamResult: LlmStreamResult) {
         when (streamResult) {
             is LlmStreamResult.Token -> {
-                runOnUiThread {
-                    sb.append(streamResult.text)
-                    Message(sb.toString(), MessageType.ASSISTANT).let { lastMsg ->
-                        val size = messages.size
-                        messages[size - 1].let { msg ->
-                            if (msg.type != MessageType.ASSISTANT) {
-                                messages.add(lastMsg)
-                            } else {
-                                messages[size - 1] = lastMsg
-                            }
+                sb.append(streamResult.text)
+
+                // --- Garbage detection: stop degenerate outputs ("Reactive Reactive..." loops) ---
+                val token = streamResult.text.trim()
+                if (token.isNotEmpty()) {
+                    if (token == lastTokenForRepeatCheck) {
+                        repeatTokenCount++
+                    } else {
+                        lastTokenForRepeatCheck = token
+                        repeatTokenCount = 1
+                    }
+                }
+                if (repeatTokenCount >= MAX_REPEAT_TOKENS && !streamStopRequested) {
+                    streamStopRequested = true
+                    Log.w(TAG, "Garbage output detected: '$token' repeated $repeatTokenCount times. Stopping stream.")
+                    modelScope.launch {
+                        try {
+                            if (isLoadVlmModel) vlmWrapper.stopStream()
+                            else if (isLoadLlmModel) llmWrapper.stopStream()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error stopping stream: ${e.message}")
                         }
                     }
-                    adapter.notifyDataSetChanged()
+                    runOnUiThread {
+                        val errorMsg = "⚠️ Model produced repetitive output and was stopped.\n\n" +
+                            "**Try:**\n" +
+                            "- Clear chat and retry\n" +
+                            "- Use a different model (Qwen3-4B LLM recommended)\n" +
+                            "- For document text: use PaddleOCR instead"
+                        val size = messages.size
+                        messages[size - 1] = Message(errorMsg, MessageType.ASSISTANT)
+                        adapter.notifyItemChanged(size - 1)
+                    }
+                    return
+                }
+
+                // --- Throttled UI update to prevent screen flickering ---
+                val now = System.currentTimeMillis()
+                if (now - lastUiUpdateMs >= UI_UPDATE_INTERVAL_MS) {
+                    lastUiUpdateMs = now
+                    runOnUiThread {
+                        // Strip <think>...</think> tags from display
+                        val displayText = sb.toString()
+                            .replace(thinkTagRegex, "")
+                            .replace(openThinkTagRegex, "")
+                            .trimStart('\n', ' ')
+                        Message(displayText, MessageType.ASSISTANT).let { lastMsg ->
+                            val size = messages.size
+                            messages[size - 1].let { msg ->
+                                if (msg.type != MessageType.ASSISTANT) {
+                                    messages.add(lastMsg)
+                                } else {
+                                    messages[size - 1] = lastMsg
+                                }
+                            }
+                        }
+                        adapter.notifyItemChanged(messages.size - 1)
+                    }
                 }
                 Log.d(TAG, "Token: ${streamResult.text}")
             }
 
             is LlmStreamResult.Completed -> {
+                // Reset garbage detection state
+                lastTokenForRepeatCheck = ""
+                repeatTokenCount = 0
+                streamStopRequested = false
+                lastUiUpdateMs = 0L
+
+                // Strip think tags from final content
+                val cleanContent = sb.toString()
+                    .replace(thinkTagRegex, "")
+                    .replace(openThinkTagRegex, "")
+                    .trimStart('\n', ' ')
+
                 if (isLoadVlmModel) {
                     vlmChatList.add(
                         VlmChatMessage(
                             "assistant",
-                            listOf(VlmContent("text", sb.toString()))
+                            listOf(VlmContent("text", cleanContent))
                         )
                     )
+                    // Store VLM extraction for cross-model pipeline
+                    lastVlmExtraction = cleanContent
                 } else {
-                    chatList.add(ChatMessage("assistant", sb.toString()))
+                    chatList.add(ChatMessage("assistant", cleanContent))
                 }
 
                 runOnUiThread {
-                    var content = sb.toString()
+                    val content = cleanContent
                     val size = messages.size
                     messages[size - 1] = Message(content, MessageType.ASSISTANT)
 
                     // Auto-save health record if it contains medical data
                     if (content.contains("## Document Type:") ||
                         content.contains("### Findings") ||
-                        content.contains("### Medications")) {
+                        content.contains("### Medications") ||
+                        content.contains("Document Type:") ||
+                        content.contains("Findings") && content.contains("Medications")) {
                         saveHealthRecord(content)
                     }
 
