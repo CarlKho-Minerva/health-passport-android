@@ -1492,7 +1492,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         ModelConfig(
                             nCtx = 2048,
                             nThreads = 8,
-                            enable_thinking = enableThinking,
+                            enable_thinking = false,  // NPU VLM: disable thinking to avoid empty <think> loops
                             npu_lib_folder_path = applicationInfo.nativeLibraryDir,
                             npu_model_folder_path = selectModelData.modelDir(this@MainActivity).absolutePath
                         )
@@ -1503,7 +1503,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                             nBatch = 1,
                             nUBatch = 1,
                             nGpuLayers = nGpuLayers,
-                            enable_thinking = enableThinking
+                            enable_thinking = false  // VLM: disable thinking mode
                         )
                     }
 
@@ -2170,11 +2170,21 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 reloadRecycleView()
             }
 
-            val inputString = etInput.text.trim().toString()
+            var inputString = etInput.text.trim().toString()
             etInput.setText("")
             etInput.clearFocus()
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(etInput.windowToken, 0)
+
+            // Auto-prompt: if user sends image(s) without text, provide a medical extraction prompt
+            if (inputString.isEmpty() && savedImageFiles.isNotEmpty() && isLoadVlmModel) {
+                inputString = "Extract all text and medical data from this image. Output structured markdown with sections for Findings, Medications, and Action Items."
+            }
+
+            if (inputString.isEmpty() && savedImageFiles.isEmpty()) {
+                Toast.makeText(this@MainActivity, "Type a message or attach a photo", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
 
             if (inputString.isNotEmpty()) {
                 messages.add(Message(inputString, MessageType.USER))
