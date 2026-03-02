@@ -1036,10 +1036,12 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
     private fun addSystemPrompt(sysPrompt: String) {
         llmSystemPrompt = ChatMessage("system", sysPrompt)
         chatList.add(llmSystemPrompt)
+        // VLM gets a short prompt so it doesn't echo the template on text-only queries
+        val vlmPrompt = "You are a medical document scanner. When given an image, extract all text and medical data. Output structured markdown."
         vlmSystemPrompty =
             VlmChatMessage(
                 "system",
-                listOf(VlmContent("text", sysPrompt))
+                listOf(VlmContent("text", vlmPrompt))
             )
         vlmChatList.add(vlmSystemPrompty)
     }
@@ -1055,42 +1057,31 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 this@MainActivity, tip, Toast.LENGTH_SHORT
             ).show()
 
-            // Update status with loaded model name and type
-            val modelData = modelList.firstOrNull { it.id == selectModelId }
-            val modelTypeLabel = when {
-                isLoadVlmModel -> "VLM"
-                isLoadLlmModel -> "LLM"
-                isLoadCVModel -> "OCR"
-                isLoadAsrModel -> "ASR"
-                isLoadEmbedderModel -> "Embed"
-                isLoadRerankerModel -> "Rerank"
-                else -> "Model"
+            // Build multi-model status showing ALL loaded models
+            val loadedParts = mutableListOf<String>()
+            if (isLoadLlmModel) {
+                val llmName = modelList.firstOrNull { it.id == selectModelId && (it.type == "chat" || it.type == "llm") }?.displayName
+                loadedParts.add("LLM: ${llmName ?: "loaded"}")
             }
-            val displayName = modelData?.displayName ?: selectModelId
-            tvModelStatus.text = "$modelTypeLabel: $displayName · Ready"
+            if (isLoadCVModel) loadedParts.add("OCR")
+            if (isLoadVlmModel) loadedParts.add("VLM")
+            if (isLoadEmbedderModel) loadedParts.add("EMB")
+            if (isLoadAsrModel) loadedParts.add("ASR")
+            if (isLoadRerankerModel) loadedParts.add("RNK")
+            tvModelStatus.text = if (loadedParts.isNotEmpty()) {
+                loadedParts.joinToString(" + ") + " · Ready"
+            } else {
+                val modelData = modelList.firstOrNull { it.id == selectModelId }
+                "${modelData?.displayName ?: selectModelId} · Ready"
+            }
 
-            // change UI
-            btnAddImage.visibility = View.INVISIBLE
-            btnAudioRecord.visibility = View.INVISIBLE
-            if (isLoadVlmModel) {
-                btnAddImage.visibility = View.VISIBLE
-                btnAudioRecord.visibility = View.VISIBLE
-            }
-            if (isLoadCVModel) {
-                btnAddImage.visibility = View.VISIBLE
-            }
-            if (isLoadAsrModel) {
-                btnAudioRecord.visibility = View.VISIBLE
-            }
-            //
+            // Enable UI features based on ALL loaded models (not just the latest)
+            btnAddImage.visibility = if (isLoadVlmModel || isLoadCVModel) View.VISIBLE else View.INVISIBLE
+            btnAudioRecord.visibility = if (isLoadVlmModel || isLoadAsrModel) View.VISIBLE else View.INVISIBLE
             btnUnloadModel.visibility = View.VISIBLE
             llLoading.visibility = View.INVISIBLE
-            //
-            if (isLoadEmbedderModel || isLoadRerankerModel || isLoadAsrModel || isLoadCVModel) {
-                btnStop.visibility = View.GONE
-            } else {
-                btnStop.visibility = View.VISIBLE
-            }
+            // Stop button works for LLM/VLM streaming
+            btnStop.visibility = if (isLoadLlmModel || isLoadVlmModel) View.VISIBLE else View.GONE
         }
     }
 
@@ -1354,7 +1345,34 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
     private fun loadModel(selectModelData: ModelData, modelDataPluginId: String, nGpuLayers: Int) {
         modelScope.launch {
-            resetLoadState()
+            // Multi-model: only unload the specific type being replaced, not all models
+            val modelType = selectModelData.getNexaManifest(this@MainActivity)?.ModelType ?: selectModelData.type
+            when (modelType) {
+                "chat", "llm" -> {
+                    if (isLoadLlmModel) { try { llmWrapper.stopStream(); llmWrapper.destroy(); chatList.clear() } catch (_: Exception) {} }
+                    isLoadLlmModel = false
+                }
+                "multimodal", "vlm" -> {
+                    if (isLoadVlmModel) { try { vlmWrapper.stopStream(); vlmWrapper.destroy(); vlmChatList.clear() } catch (_: Exception) {} }
+                    isLoadVlmModel = false
+                }
+                "paddleocr" -> {
+                    if (isLoadCVModel) { try { cvWrapper.destroy() } catch (_: Exception) {} }
+                    isLoadCVModel = false
+                }
+                "embedder" -> {
+                    if (isLoadEmbedderModel) { try { embedderWrapper?.destroy() } catch (_: Exception) {} }
+                    isLoadEmbedderModel = false
+                }
+                "asr" -> {
+                    if (isLoadAsrModel) { try { asrWrapper.destroy() } catch (_: Exception) {} }
+                    isLoadAsrModel = false
+                }
+                "reranker" -> {
+                    if (isLoadRerankerModel) { try { rerankerWrapper.destroy() } catch (_: Exception) {} }
+                    isLoadRerankerModel = false
+                }
+            }
             val nexaManifestBean = selectModelData.getNexaManifest(this@MainActivity)
             val pluginId = nexaManifestBean?.PluginId ?: modelDataPluginId
 
@@ -1551,321 +1569,331 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
     private fun downloadModel(selectModelData: ModelData) {
         // Check local files first before SharedPreferences
         val fileName = isModelDownloaded(selectModelData)
-        if (fileName == null || hasLoadedModel()) {
-            Toast.makeText(this@MainActivity, "model already downloaded", Toast.LENGTH_SHORT)
+        if (fileName == null) {
+            Toast.makeText(this@MainActivity, "Model already downloaded", Toast.LENGTH_SHORT)
                 .show()
-        } else {
-            downloadState = DownloadState.DOWNLOADING
-            downloadingModelData = selectModelData
-            llDownloading.visibility = View.VISIBLE
-            tvDownloadProgress.text = "0%"
-            // Keep screen/CPU alive during download so sleep doesn't interrupt it
-            downloadWakeLock = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
-                .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "HealthPassport:Download")
-                .also { it.acquire(30 * 60 * 1000L /*30min*/) }
-            modelScope.launch {
-                val selectModelData = modelList.first { it.id == selectModelId }
-                val unsafeClient = getUnsafeOkHttpClient().build()
+            return
+        }
+        if (downloadState == DownloadState.DOWNLOADING) {
+            Toast.makeText(this@MainActivity, "A download is already in progress", Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        // Sync selectModelId so post-download auto-load uses the right model
+        selectModelId = selectModelData.id
+        val pos = modelList.indexOfFirst { it.id == selectModelId }
+        if (pos >= 0) spModelList.setSelection(pos)
 
-                // Track URL mapping for fallback: primary URL -> fallback URL
-                val fallbackUrlMap = mutableMapOf<String, String>()
-                // Track failed downloads for fallback retry
-                val failedDownloads = mutableListOf<DownloadableFileWithFallback>()
+        downloadState = DownloadState.DOWNLOADING
+        downloadingModelData = selectModelData
+        llDownloading.visibility = View.VISIBLE
+        tvDownloadProgress.text = "0%"
+        // Keep screen/CPU alive during download so sleep doesn't interrupt it
+        downloadWakeLock = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "HealthPassport:Download")
+            .also { it.acquire(30 * 60 * 1000L /*30min*/) }
+        modelScope.launch {
+            // Use the passed model data directly (don't re-lookup from selectModelId)
+            val unsafeClient = getUnsafeOkHttpClient().build()
 
-                // For NPU models without explicit files list, fetch file list with fallback support
-                val filesToDownloadWithFallback: List<DownloadableFileWithFallback> = if (selectModelData.isNpuModel() &&
-                    selectModelData.files.isNullOrEmpty() &&
-                    !selectModelData.baseUrl.isNullOrEmpty()) {
+            // Track URL mapping for fallback: primary URL -> fallback URL
+            val fallbackUrlMap = mutableMapOf<String, String>()
+            // Track failed downloads for fallback retry
+            val failedDownloads = mutableListOf<DownloadableFileWithFallback>()
 
-                    Log.d(TAG, "NPU model detected, fetching file list: ${selectModelData.baseUrl}")
+            // For NPU models without explicit files list, fetch file list with fallback support
+            val filesToDownloadWithFallback: List<DownloadableFileWithFallback> = if (selectModelData.isNpuModel() &&
+                selectModelData.files.isNullOrEmpty() &&
+                !selectModelData.baseUrl.isNullOrEmpty()) {
 
-                    // Fetch file list with fallback support
-                    val result = ModelFileListingUtil.listFilesWithFallback(selectModelData.baseUrl!!, unsafeClient)
+                Log.d(TAG, "NPU model detected, fetching file list: ${selectModelData.baseUrl}")
 
-                    if (result.files.isEmpty()) {
-                        Log.e(TAG, "Failed to fetch file list for ${selectModelData.id}")
-                        runOnUiThread {
-                            downloadState = DownloadState.IDLE
-                            llDownloading.visibility = View.GONE
-                            downloadWakeLock?.let { if (it.isHeld) it.release() }
-                            downloadWakeLock = null
-                            Toaster.show("Failed to fetch file list.")
-                        }
-                        return@launch
-                    }
+                // Fetch file list with fallback support
+                val result = ModelFileListingUtil.listFilesWithFallback(selectModelData.baseUrl!!, unsafeClient)
 
-                    val useHfUrls = result.source == ModelFileListingUtil.FileListResult.Source.HUGGINGFACE
-                    Log.d(TAG, "Found ${result.files.size} files from ${result.source}: ${result.files}")
-
-                    selectModelData.downloadableFilesWithFallback(
-                        selectModelData.modelDir(this@MainActivity),
-                        result.files,
-                        useHfUrls
-                    )
-                } else {
-                    // For non-NPU models or models with explicit files, use the original method with fallback
-                    selectModelData.downloadableFiles(selectModelData.modelDir(this@MainActivity)).withFallbackUrls()
-                }
-
-                // Build fallback URL map
-                filesToDownloadWithFallback.forEach {
-                    fallbackUrlMap[it.primaryUrl] = it.fallbackUrl
-                }
-
-                // Convert to simple DownloadableFile for initial download attempt
-                val filesToDownload = filesToDownloadWithFallback.map {
-                    DownloadableFile(it.file, it.primaryUrl)
-                }
-
-                Log.d(TAG, "filesToDownload: $filesToDownload")
-                if (filesToDownload.isEmpty()) throw IllegalArgumentException("No download URL")
-
-                fun getUrlFileSize(client: OkHttpClient, url: String): Long {
-                    val hostname = try {
-                        url.substringAfter("://").substringBefore("/")
-                    } catch (e: Exception) {
-                        "unknown"
-                    }
-
-                    Log.d(TAG, "Requesting file size: $hostname")
-
-                    val builder = Request.Builder().url(url).head()
-                    getHfToken(selectModelData, url)?.let {
-                        builder.addHeader("Authorization", "Bearer $it")
-                    }
-                    val request = builder.build()
-                    try {
-                        client.newCall(request).execute().use { resp ->
-                            val size = resp.header("Content-Length")?.toLongOrNull() ?: 0L
-                            Log.d(TAG, "Response: code=${resp.code}, size=$size")
-                            return size
-                        }
-                    } catch (e: java.net.UnknownHostException) {
-                        Log.e(TAG, "DNS resolution failed for $hostname - Check DNS/network")
-                        return 0L
-                    } catch (e: java.net.SocketTimeoutException) {
-                        Log.e(TAG, "Connection timeout to $hostname - Possible firewall/proxy issue")
-                        return 0L
-                    } catch (e: java.net.ConnectException) {
-                        Log.e(TAG, "Connection refused by $hostname - Server unreachable")
-                        return 0L
-                    } catch (e: javax.net.ssl.SSLException) {
-                        Log.e(TAG, "SSL/TLS error to $hostname - ${e.message}")
-                        return 0L
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Network error: ${e.javaClass.simpleName} - ${e.message}")
-                        return 0L
-                    }
-                }
-
-                // Try to get file sizes, with fallback to HF if S3 fails
-                val fileSizeMap = mutableMapOf<String, Long>()
-                filesToDownloadWithFallback.forEach { fileWithFallback ->
-                    var size = getUrlFileSize(unsafeClient, fileWithFallback.primaryUrl)
-                    if (size == 0L && fileWithFallback.fallbackUrl != fileWithFallback.primaryUrl) {
-                        Log.w(TAG, "Primary URL failed, trying fallback for size: ${fileWithFallback.file.name}")
-                        size = getUrlFileSize(unsafeClient, fileWithFallback.fallbackUrl)
-                    }
-                    fileSizeMap[fileWithFallback.primaryUrl] = size
-                }
-
-                val totalSizes = filesToDownload.map { fileSizeMap[it.url] ?: 0L }
-                if (totalSizes.any { it == 0L }) {
+                if (result.files.isEmpty()) {
+                    Log.e(TAG, "Failed to fetch file list for ${selectModelData.id}")
                     runOnUiThread {
                         downloadState = DownloadState.IDLE
                         llDownloading.visibility = View.GONE
                         downloadWakeLock?.let { if (it.isHeld) it.release() }
                         downloadWakeLock = null
-                        Toaster.show("Download failed - could not get file sizes.")
+                        Toaster.show("Failed to fetch file list.")
                     }
                     return@launch
                 }
 
-                val alreadyDownloaded = mutableMapOf<String, Long>()
-                val totalBytes = totalSizes.sum()
-                Log.d(TAG, "all model size: $totalBytes")
+                val useHfUrls = result.source == ModelFileListingUtil.FileListResult.Source.HUGGINGFACE
+                Log.d(TAG, "Found ${result.files.size} files from ${result.source}: ${result.files}")
 
-                val startTime = System.currentTimeMillis()
-                var lastProgressTime = 0L
-                val progressInterval = 500L
+                selectModelData.downloadableFilesWithFallback(
+                    selectModelData.modelDir(this@MainActivity),
+                    result.files,
+                    useHfUrls
+                )
+            } else {
+                // For non-NPU models or models with explicit files, use the original method with fallback
+                selectModelData.downloadableFiles(selectModelData.modelDir(this@MainActivity)).withFallbackUrls()
+            }
 
-                fun onProgress(
-                    modelId: String,
-                    percent: Int,
-                    downloaded: Long,
-                    totalBytes: Long,
-                    etaSec: Long,
-                    speedStr: String
-                ) {
-                    runOnUiThread {
-                        if (100 == percent) {
+            // Build fallback URL map
+            filesToDownloadWithFallback.forEach {
+                fallbackUrlMap[it.primaryUrl] = it.fallbackUrl
+            }
+
+            // Convert to simple DownloadableFile for initial download attempt
+            val filesToDownload = filesToDownloadWithFallback.map {
+                DownloadableFile(it.file, it.primaryUrl)
+            }
+
+            Log.d(TAG, "filesToDownload: $filesToDownload")
+            if (filesToDownload.isEmpty()) throw IllegalArgumentException("No download URL")
+
+            fun getUrlFileSize(client: OkHttpClient, url: String): Long {
+                val hostname = try {
+                    url.substringAfter("://").substringBefore("/")
+                } catch (e: Exception) {
+                    "unknown"
+                }
+
+                Log.d(TAG, "Requesting file size: $hostname")
+
+                val builder = Request.Builder().url(url).head()
+                getHfToken(selectModelData, url)?.let {
+                    builder.addHeader("Authorization", "Bearer $it")
+                }
+                val request = builder.build()
+                try {
+                    client.newCall(request).execute().use { resp ->
+                        val size = resp.header("Content-Length")?.toLongOrNull() ?: 0L
+                        Log.d(TAG, "Response: code=${resp.code}, size=$size")
+                        return size
+                    }
+                } catch (e: java.net.UnknownHostException) {
+                    Log.e(TAG, "DNS resolution failed for $hostname - Check DNS/network")
+                    return 0L
+                } catch (e: java.net.SocketTimeoutException) {
+                    Log.e(TAG, "Connection timeout to $hostname - Possible firewall/proxy issue")
+                    return 0L
+                } catch (e: java.net.ConnectException) {
+                    Log.e(TAG, "Connection refused by $hostname - Server unreachable")
+                    return 0L
+                } catch (e: javax.net.ssl.SSLException) {
+                    Log.e(TAG, "SSL/TLS error to $hostname - ${e.message}")
+                    return 0L
+                } catch (e: Exception) {
+                    Log.e(TAG, "Network error: ${e.javaClass.simpleName} - ${e.message}")
+                    return 0L
+                }
+            }
+
+            // Try to get file sizes, with fallback to HF if S3 fails
+            val fileSizeMap = mutableMapOf<String, Long>()
+            filesToDownloadWithFallback.forEach { fileWithFallback ->
+                var size = getUrlFileSize(unsafeClient, fileWithFallback.primaryUrl)
+                if (size == 0L && fileWithFallback.fallbackUrl != fileWithFallback.primaryUrl) {
+                    Log.w(TAG, "Primary URL failed, trying fallback for size: ${fileWithFallback.file.name}")
+                    size = getUrlFileSize(unsafeClient, fileWithFallback.fallbackUrl)
+                }
+                fileSizeMap[fileWithFallback.primaryUrl] = size
+            }
+
+            val totalSizes = filesToDownload.map { fileSizeMap[it.url] ?: 0L }
+            if (totalSizes.any { it == 0L }) {
+                runOnUiThread {
+                    downloadState = DownloadState.IDLE
+                    llDownloading.visibility = View.GONE
+                    downloadWakeLock?.let { if (it.isHeld) it.release() }
+                    downloadWakeLock = null
+                    Toaster.show("Download failed - could not get file sizes.")
+                }
+                return@launch
+            }
+
+            val alreadyDownloaded = mutableMapOf<String, Long>()
+            val totalBytes = totalSizes.sum()
+            Log.d(TAG, "all model size: $totalBytes")
+
+            val startTime = System.currentTimeMillis()
+            var lastProgressTime = 0L
+            val progressInterval = 500L
+
+            fun onProgress(
+                modelId: String,
+                percent: Int,
+                downloaded: Long,
+                totalBytes: Long,
+                etaSec: Long,
+                speedStr: String
+            ) {
+                runOnUiThread {
+                    if (100 == percent) {
+                        llDownloading.visibility = View.GONE
+                        spDownloaded.edit().putBoolean(selectModelId, true).commit()
+                        // Write completion marker so getNonExistModelFile knows download is complete
+                        try {
+                            File(selectModelData.modelDir(this@MainActivity), ".complete").writeText("done")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Could not write .complete marker: ${e.message}")
+                        }
+                        downloadWakeLock?.let { if (it.isHeld) it.release() }
+                        downloadWakeLock = null
+                        Toaster.show("${downloadingModelData?.displayName} downloaded")
+                    } else {
+                        tvDownloadProgress.text = "$percent%"
+                    }
+                }
+            }
+
+            fun reportProgress(force: Boolean = false) {
+                val now = System.currentTimeMillis()
+                if (force || now - lastProgressTime > progressInterval) {
+                    val elapsedMs = now - startTime
+                    val downloaded = alreadyDownloaded.values.sum()
+                    val percent =
+                        if (totalBytes > 0) ((downloaded * 100) / totalBytes).toInt() else 0
+                    val speedAvg =
+                        if (elapsedMs > 0) downloaded / (elapsedMs / 1000.0) else 0.0
+                    val etaSec =
+                        if (speedAvg > 0) ((totalBytes - downloaded) / speedAvg).toLong() else -1L
+                    val speedStr = if (speedAvg > 1024 * 1024) {
+                        String.format("%.2f MB/s", speedAvg / (1024 * 1024))
+                    } else {
+                        String.format("%.1f KB/s", speedAvg / 1024)
+                    }
+                    onProgress(selectModelId, percent, downloaded, totalBytes, etaSec, speedStr)
+                    lastProgressTime = now
+                }
+            }
+
+            // Function to start download for a list of files
+            fun startDownload(
+                downloadFiles: List<DownloadableFile>,
+                isFallbackAttempt: Boolean = false
+            ) {
+                if (downloadFiles.isEmpty()) {
+                    if (failedDownloads.isEmpty()) {
+                        // All downloads complete
+                        downloadState = DownloadState.IDLE
+                        reportProgress(force = true)
+                        onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
+                    } else {
+                        runOnUiThread {
+                            downloadState = DownloadState.IDLE
                             llDownloading.visibility = View.GONE
-                            spDownloaded.edit().putBoolean(selectModelId, true).commit()
-                            // Write completion marker so getNonExistModelFile knows download is complete
-                            try {
-                                File(selectModelData.modelDir(this@MainActivity), ".complete").writeText("done")
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Could not write .complete marker: ${e.message}")
-                            }
                             downloadWakeLock?.let { if (it.isHeld) it.release() }
                             downloadWakeLock = null
-                            Toaster.show("${downloadingModelData?.displayName} downloaded")
-                        } else {
-                            tvDownloadProgress.text = "$percent%"
+                            Toaster.show("Download failed for some files.")
                         }
                     }
+                    return
                 }
 
-                fun reportProgress(force: Boolean = false) {
-                    val now = System.currentTimeMillis()
-                    if (force || now - lastProgressTime > progressInterval) {
-                        val elapsedMs = now - startTime
-                        val downloaded = alreadyDownloaded.values.sum()
-                        val percent =
-                            if (totalBytes > 0) ((downloaded * 100) / totalBytes).toInt() else 0
-                        val speedAvg =
-                            if (elapsedMs > 0) downloaded / (elapsedMs / 1000.0) else 0.0
-                        val etaSec =
-                            if (speedAvg > 0) ((totalBytes - downloaded) / speedAvg).toLong() else -1L
-                        val speedStr = if (speedAvg > 1024 * 1024) {
-                            String.format("%.2f MB/s", speedAvg / (1024 * 1024))
-                        } else {
-                            String.format("%.1f KB/s", speedAvg / 1024)
-                        }
-                        onProgress(selectModelId, percent, downloaded, totalBytes, etaSec, speedStr)
-                        lastProgressTime = now
+                val queueSet = DownloadContext.QueueSet()
+                    .setParentPathFile(downloadFiles[0].file.parentFile)
+                    .setMinIntervalMillisCallbackProcess(300)
+                val builder = queueSet.commit()
+
+                downloadFiles.forEach { item ->
+                    val taskBuilder = DownloadTask.Builder(item.url, item.file)
+                    getHfToken(selectModelData, item.url)?.let {
+                        taskBuilder.addHeader("Authorization", "Bearer $it")
                     }
+                    val task = taskBuilder.build()
+                    task.info?.let {
+                        alreadyDownloaded[it.url] = it.totalOffset
+                    }
+                    builder.bindSetTask(task)
                 }
 
-                // Function to start download for a list of files
-                fun startDownload(
-                    downloadFiles: List<DownloadableFile>,
-                    isFallbackAttempt: Boolean = false
-                ) {
-                    if (downloadFiles.isEmpty()) {
-                        if (failedDownloads.isEmpty()) {
-                            // All downloads complete
-                            downloadState = DownloadState.IDLE
-                            reportProgress(force = true)
-                            onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
-                        } else {
-                            runOnUiThread {
-                                downloadState = DownloadState.IDLE
-                                llDownloading.visibility = View.GONE
-                                downloadWakeLock?.let { if (it.isHeld) it.release() }
-                                downloadWakeLock = null
-                                Toaster.show("Download failed for some files.")
+                val totalCount = filesToDownload.size
+                var currentCount = filesToDownload.size - downloadFiles.size
+                val pendingFallbacks = mutableListOf<DownloadableFile>()
+
+                downloadContext = builder.setListener(createDownloadContextListener {}).build()
+                downloadContext?.start(
+                    createListener1(taskStart = { task, _ ->
+                        Log.d(TAG, "download task ${task.id} Start${if (isFallbackAttempt) " (fallback)" else ""}")
+                    }, retry = { task, _ ->
+                        Log.d(TAG, "download task ${task.id} retry")
+                    }, connected = { task, _, _, _ ->
+                        Log.d(TAG, "download task ${task.id} connected")
+                    }, progress = { task, currentOffset, totalLength ->
+                        Log.d(TAG, "download task ${task.id} progress $currentOffset $totalLength")
+                        alreadyDownloaded[task.url] = currentOffset
+                        reportProgress(true)
+                    }) { task, cause, exception, _ ->
+                        when(cause) {
+                            EndCause.CANCELED -> {
+                                // do nothing
                             }
-                        }
-                        return
-                    }
 
-                    val queueSet = DownloadContext.QueueSet()
-                        .setParentPathFile(downloadFiles[0].file.parentFile)
-                        .setMinIntervalMillisCallbackProcess(300)
-                    val builder = queueSet.commit()
+                            EndCause.COMPLETED -> {
+                                Log.d(TAG, "download task ${task.id} end")
+                                currentCount += 1
+                                Log.d(TAG, "download task process currentCount:$currentCount, totalCount:$totalCount")
 
-                    downloadFiles.forEach { item ->
-                        val taskBuilder = DownloadTask.Builder(item.url, item.file)
-                        getHfToken(selectModelData, item.url)?.let {
-                            taskBuilder.addHeader("Authorization", "Bearer $it")
-                        }
-                        val task = taskBuilder.build()
-                        task.info?.let {
-                            alreadyDownloaded[it.url] = it.totalOffset
-                        }
-                        builder.bindSetTask(task)
-                    }
-
-                    val totalCount = filesToDownload.size
-                    var currentCount = filesToDownload.size - downloadFiles.size
-                    val pendingFallbacks = mutableListOf<DownloadableFile>()
-
-                    downloadContext = builder.setListener(createDownloadContextListener {}).build()
-                    downloadContext?.start(
-                        createListener1(taskStart = { task, _ ->
-                            Log.d(TAG, "download task ${task.id} Start${if (isFallbackAttempt) " (fallback)" else ""}")
-                        }, retry = { task, _ ->
-                            Log.d(TAG, "download task ${task.id} retry")
-                        }, connected = { task, _, _, _ ->
-                            Log.d(TAG, "download task ${task.id} connected")
-                        }, progress = { task, currentOffset, totalLength ->
-                            Log.d(TAG, "download task ${task.id} progress $currentOffset $totalLength")
-                            alreadyDownloaded[task.url] = currentOffset
-                            reportProgress(true)
-                        }) { task, cause, exception, _ ->
-                            when(cause) {
-                                EndCause.CANCELED -> {
-                                    // do nothing
+                                if (currentCount >= totalCount) {
+                                    downloadState = DownloadState.IDLE
+                                    reportProgress(force = true)
+                                    onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
                                 }
+                            }
 
-                                EndCause.COMPLETED -> {
-                                    Log.d(TAG, "download task ${task.id} end")
-                                    currentCount += 1
-                                    Log.d(TAG, "download task process currentCount:$currentCount, totalCount:$totalCount")
+                            else -> {
+                                Log.e(TAG, "download task ${task.id} error: $cause, ${exception?.message}")
 
-                                    if (currentCount >= totalCount) {
-                                        downloadState = DownloadState.IDLE
-                                        reportProgress(force = true)
-                                        onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
-                                    }
-                                }
-
-                                else -> {
-                                    Log.e(TAG, "download task ${task.id} error: $cause, ${exception?.message}")
-
-                                    // Try fallback URL if available and not already a fallback attempt
-                                    if (!isFallbackAttempt) {
-                                        val fallbackUrl = fallbackUrlMap[task.url]
-                                        if (fallbackUrl != null && fallbackUrl != task.url && task.file != null) {
-                                            Log.w(TAG, "Primary download failed, queuing fallback: ${task.file?.name}")
-                                            pendingFallbacks.add(DownloadableFile(task.file!!, fallbackUrl))
-                                        } else {
-                                            val failedFile = filesToDownloadWithFallback.find { it.primaryUrl == task.url }
-                                            if (failedFile != null) {
-                                                failedDownloads.add(failedFile)
-                                            }
-                                        }
+                                // Try fallback URL if available and not already a fallback attempt
+                                if (!isFallbackAttempt) {
+                                    val fallbackUrl = fallbackUrlMap[task.url]
+                                    if (fallbackUrl != null && fallbackUrl != task.url && task.file != null) {
+                                        Log.w(TAG, "Primary download failed, queuing fallback: ${task.file?.name}")
+                                        pendingFallbacks.add(DownloadableFile(task.file!!, fallbackUrl))
                                     } else {
-                                        val failedFile = filesToDownloadWithFallback.find {
-                                            it.primaryUrl == task.url || it.fallbackUrl == task.url
-                                        }
+                                        val failedFile = filesToDownloadWithFallback.find { it.primaryUrl == task.url }
                                         if (failedFile != null) {
                                             failedDownloads.add(failedFile)
                                         }
                                     }
-
-                                    currentCount += 1
-                                    if (currentCount >= totalCount && pendingFallbacks.isEmpty()) {
-                                        if (failedDownloads.isEmpty()) {
-                                            downloadState = DownloadState.IDLE
-                                            reportProgress(force = true)
-                                            onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
-                                        } else {
-                                            runOnUiThread {
-                                                downloadState = DownloadState.IDLE
-                                                llDownloading.visibility = View.GONE
-                                                downloadWakeLock?.let { if (it.isHeld) it.release() }
-                                                downloadWakeLock = null
-                                                Toaster.show("Download failed for ${failedDownloads.size} file(s).")
-                                            }
-                                        }
-                                    } else if (pendingFallbacks.isNotEmpty()) {
-                                        Log.d(TAG, "Starting ${pendingFallbacks.size} fallback downloads")
-                                        modelScope.launch {
-                                            startDownload(pendingFallbacks.toList(), isFallbackAttempt = true)
-                                        }
-                                        pendingFallbacks.clear()
+                                } else {
+                                    val failedFile = filesToDownloadWithFallback.find {
+                                        it.primaryUrl == task.url || it.fallbackUrl == task.url
+                                    }
+                                    if (failedFile != null) {
+                                        failedDownloads.add(failedFile)
                                     }
                                 }
-                            }
-                        }, true
-                    )
-                }
 
-                // Start initial download with primary URLs
-                startDownload(filesToDownload)
+                                currentCount += 1
+                                if (currentCount >= totalCount && pendingFallbacks.isEmpty()) {
+                                    if (failedDownloads.isEmpty()) {
+                                        downloadState = DownloadState.IDLE
+                                        reportProgress(force = true)
+                                        onProgress(selectModelId, 100, totalBytes, totalBytes, 0, "0 KB/s")
+                                    } else {
+                                        runOnUiThread {
+                                            downloadState = DownloadState.IDLE
+                                            llDownloading.visibility = View.GONE
+                                            downloadWakeLock?.let { if (it.isHeld) it.release() }
+                                            downloadWakeLock = null
+                                            Toaster.show("Download failed for ${failedDownloads.size} file(s).")
+                                        }
+                                    }
+                                } else if (pendingFallbacks.isNotEmpty()) {
+                                    Log.d(TAG, "Starting ${pendingFallbacks.size} fallback downloads")
+                                    modelScope.launch {
+                                        startDownload(pendingFallbacks.toList(), isFallbackAttempt = true)
+                                    }
+                                    pendingFallbacks.clear()
+                                }
+                            }
+                        }
+                    }, true
+                )
             }
+
+            // Start initial download with primary URLs
+            startDownload(filesToDownload)
         }
     }
 
@@ -1891,7 +1919,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         container.addView(header)
 
         val subtitle = TextView(this).apply {
-            text = "Models run entirely on-device via Qualcomm NPU"
+            text = "Multi-model: load LLM + OCR together for full pipeline"
             setTextColor(Color.parseColor("#808080"))
             textSize = 12f
             setPadding(0, dp(4), 0, dp(12))
@@ -1901,8 +1929,16 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         // Model list
         for (model in modelList) {
             val isDownloaded = isModelDownloaded(model) == null
-            val isCurrentModel = model.id == selectModelId
-            val isLoaded = isCurrentModel && hasLoadedModel()
+            // Multi-model: check if THIS specific model type is loaded
+            val isLoaded = when (model.type) {
+                "chat", "llm" -> isLoadLlmModel && model.id == selectModelId
+                "multimodal", "vlm" -> isLoadVlmModel
+                "paddleocr" -> isLoadCVModel
+                "embedder" -> isLoadEmbedderModel
+                "asr" -> isLoadAsrModel
+                "reranker" -> isLoadRerankerModel
+                else -> false
+            }
 
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1918,23 +1954,41 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 layoutParams = lp
             }
 
-            // Type emoji indicator
-            val typeEmoji = when (model.type) {
-                "multimodal", "vlm" -> "👁️"
-                "chat", "llm" -> "💬"
-                "paddleocr" -> "📄"
-                "asr" -> "🎙️"
-                "embedder" -> "🔗"
-                "reranker" -> "📊"
-                else -> "🤖"
+            // Color-coded type badge
+            val typeColor = when (model.type) {
+                "multimodal", "vlm" -> "#A855F7"  // purple
+                "chat", "llm" -> "#10B981"        // green
+                "paddleocr" -> "#3B82F6"           // blue
+                "asr" -> "#F59E0B"                 // amber
+                "embedder" -> "#22D3EE"            // cyan
+                "reranker" -> "#EF4444"            // red
+                else -> "#808080"                   // gray
+            }
+            val typeLabel = when (model.type) {
+                "multimodal", "vlm" -> "VLM"
+                "chat", "llm" -> "LLM"
+                "paddleocr" -> "OCR"
+                "asr" -> "ASR"
+                "embedder" -> "EMB"
+                "reranker" -> "RNK"
+                else -> "AI"
             }
 
-            val emojiView = TextView(this).apply {
-                text = typeEmoji
-                textSize = 20f
-                setPadding(0, 0, dp(10), 0)
+            val badgeView = TextView(this).apply {
+                text = typeLabel
+                textSize = 9f
+                setTextColor(Color.parseColor(typeColor))
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(6), dp(2), dp(6), dp(2))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.parseColor("#1A${typeColor.removePrefix("#")}"))
+                    cornerRadius = dp(4).toFloat()
+                }
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(0, 0, dp(10), 0)
+                layoutParams = lp
             }
-            card.addView(emojiView)
+            card.addView(badgeView)
 
             // Model info column
             val infoCol = LinearLayout(this).apply {
@@ -2008,15 +2062,11 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 if (pos >= 0) spModelList.setSelection(pos)
 
                 if (isDownloaded) {
-                    // Load the model
-                    if (hasLoadedModel()) {
-                        Toast.makeText(this, "Please unload current model first", Toast.LENGTH_SHORT).show()
-                    } else {
-                        btnLoadModel.performClick()
-                    }
+                    // Multi-model: load directly (replaces same-type model if already loaded)
+                    btnLoadModel.performClick()
                 } else {
-                    // Download first
-                    btnDownload.performClick()
+                    // Download the model directly (don't use btnDownload.performClick which reopens picker)
+                    downloadModel(model)
                 }
             }
 
@@ -2119,11 +2169,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         btnLoadModel.setOnClickListener {
             // Check if manual model file is selected
             if (manualModelFilePath != null) {
-                if (hasLoadedModel()) {
-                    Toast.makeText(this@MainActivity, "please unload first", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-
+                // Manual model loading can replace an existing model
                 vTip.visibility = View.VISIBLE
                 llLoading.visibility = View.VISIBLE
 
@@ -2206,10 +2252,7 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 return@setOnClickListener
             }
             Log.d(TAG, "current select model data:$selectModelData")
-            if (hasLoadedModel()) {
-                Toast.makeText(this@MainActivity, "please unload first", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
+            // Multi-model: allow loading additional models without unloading first
 
             // Check if model files exist locally before attempting to load
             val fileName = isModelDownloaded(selectModelData)
@@ -2324,57 +2367,53 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         }
 
         /**
-         * Step 5. send message
+         * Step 5. send message — Smart Pipeline Routing
+         *
+         * Architecture:
+         * - Qwen3-4B / Llama (LLM) = center stage: text Q&A with RAG from health vault
+         * - PaddleOCR = document scanner: image → extracted text → saved to vault
+         * - OmniNeural VLM = vision fallback: for images OCR can't handle (X-rays, photos)
+         * - EmbedGemma = memory indexer: embeds vault docs for semantic search
+         * - Parakeet ASR = speech input: audio → text
+         *
+         * Smart routing:
+         * - Image + OCR loaded → OCR extract → if LLM also loaded, auto-analyze
+         * - Image + VLM loaded (no OCR) → VLM process directly
+         * - Text + LLM loaded → RAG query with vault context
+         * - Audio + ASR loaded → transcribe → if LLM also loaded, auto-analyze
+         * - Multiple models loaded → pick the best pipeline automatically
          */
         btnSend.setOnClickListener {
-            // If images are captured but no model loaded → mock scan demo
-            if (savedImageFiles.isNotEmpty() && !hasLoadedModel()) {
-                messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
-                reloadRecycleView()
-                clearImages()
-                runMockScanDemo()
-                etInput.setText("")
-                return@setOnClickListener
-            }
-
-            // If images are captured with LLM loaded (not VLM/OCR) → show guidance
-            if (savedImageFiles.isNotEmpty() && hasLoadedModel() && !isLoadVlmModel && !isLoadCVModel) {
-                messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
-                reloadRecycleView()
-                clearImages()
-                etInput.setText("")
-                streamResponseToChat(
-                    "⚠️ **Current model is text-only** (no image processing).\n\n" +
-                    "For document scanning, use:\n" +
-                    "- **PaddleOCR** → extracts text from photos (recommended)\n" +
-                    "- **OmniNeural VLM** → AI vision (experimental)\n\n" +
-                    "Tap **Models** to switch. Your text questions still work!\n\n" +
-                    "*You can also ask about your health records — the vault has your data.*"
-                )
-                return@setOnClickListener
-            }
-
-            // Preloaded RAG mode — works without model loaded
+            // No model loaded at all → fallback modes
             if (!hasLoadedModel()) {
-                val inputString = etInput.text.trim().toString()
-                if (inputString.isNotEmpty()) {
-                    messages.add(Message(inputString, MessageType.USER))
+                if (savedImageFiles.isNotEmpty()) {
+                    // Mock scan demo
+                    messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
                     reloadRecycleView()
+                    clearImages()
+                    runMockScanDemo()
                     etInput.setText("")
-                    etInput.clearFocus()
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    imm.hideSoftInputFromWindow(etInput.windowToken, 0)
-
-                    if (!handlePreloadedQuery(inputString)) {
-                        // No preloaded answer — show helpful hint
-                        streamResponseToChat("I can look up your **eyes**, **medications**, **timeline**, or give a **health summary**.\n\n*Load a model in settings for free-form responses.*")
-                    }
                 } else {
-                    Toast.makeText(this@MainActivity, "Ask about your health records", Toast.LENGTH_SHORT).show()
+                    // Preloaded RAG mode
+                    val inputString = etInput.text.trim().toString()
+                    if (inputString.isNotEmpty()) {
+                        messages.add(Message(inputString, MessageType.USER))
+                        reloadRecycleView()
+                        etInput.setText("")
+                        etInput.clearFocus()
+                        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                        imm.hideSoftInputFromWindow(etInput.windowToken, 0)
+                        if (!handlePreloadedQuery(inputString)) {
+                            streamResponseToChat("I can look up your **eyes**, **medications**, **timeline**, or give a **health summary**.\n\n*Load a model for free-form responses.*")
+                        }
+                    } else {
+                        Toast.makeText(this@MainActivity, "Ask about your health records", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 return@setOnClickListener
             }
 
+            // Show images in chat if present
             if (savedImageFiles.isNotEmpty()) {
                 messages.add(Message("", MessageType.IMAGES, savedImageFiles.map { it }))
                 reloadRecycleView()
@@ -2386,280 +2425,248 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(etInput.windowToken, 0)
 
-            // Auto-prompt: if user sends image(s) without text, provide a medical extraction prompt
-            if (inputString.isEmpty() && savedImageFiles.isNotEmpty() && isLoadVlmModel) {
-                inputString = "Extract all text and medical data from this image. Output structured markdown with sections for Findings, Medications, and Action Items."
-            }
+            val hasImages = savedImageFiles.isNotEmpty()
+            val hasAudio = audioFile != null
 
-            if (inputString.isEmpty() && savedImageFiles.isEmpty()) {
+            // Auto-prompt for image-only sends
+            if (inputString.isEmpty() && hasImages) {
+                inputString = "Extract all text and medical data from this image."
+            }
+            if (inputString.isEmpty() && !hasImages && !hasAudio) {
                 Toast.makeText(this@MainActivity, "Type a message or attach a photo", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-
             if (inputString.isNotEmpty()) {
                 messages.add(Message(inputString, MessageType.USER))
                 reloadRecycleView()
             }
 
-            val supportFunctionCall = false
-            var tools: String? = null
-            var grammarString: String? = null
-            if (supportFunctionCall) {
-                // if this model support 'function call'
-                tools =
-                    "[{\"type\":\"function\",\"function\":{\"name\": \"campaign_investigation\",\"description\": \"Check campaign limits and determine appropriate action. If customer has reached limit, return a message (hardcoded or generated by model). If limit not reached, contact support.\",\"parameters\": {\"type\": \"object\", \"properties\":{\"campaign_name\":{\"type\": \"string\",\"description\": \"The name of the campaign to investigate\"}}, \"required\":[\"campaign_name\"]}}}]"
-                grammarString = """
-root ::= "<tool_call>" space object "</tool_call>" space
-object ::= "{" space campaign-name-kv "}" space
-campaign-name-kv ::= "\"campaign_name\"" space ":" space string
-string ::= "\"" char* "\"" space
-char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" hex hex hex hex)
-hex ::= [0-9a-fA-F]
-space ::= | " " | "\n" | "\r" | "\t"
-"""
-            }
-
-            if (!hasLoadedModel()) {
-                Toast.makeText(this@MainActivity, "model not loaded", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
+            // ── SMART ROUTING ──
             modelScope.launch {
-                // Reset garbage detection state for new inference
                 lastTokenForRepeatCheck = ""
                 repeatTokenCount = 0
                 streamStopRequested = false
                 lastUiUpdateMs = 0L
-
-                val selectModelData = modelList.first { it.id == selectModelId }
-                val isNpu = selectModelData.getNexaManifest(this@MainActivity)?.PluginId == "npu"
-                Log.d(TAG, "isNpu: $isNpu")
-
                 val sb = StringBuilder()
-                if (isLoadCVModel) {
-                    // PaddleOCR: extract text from document image
-                    if (savedImageFiles.isEmpty()) {
-                        runOnUiThread {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Please capture or select a document image.",
-                                Toast.LENGTH_SHORT
-                            ).show()
+
+                // ── AUDIO PATH: ASR → transcribe → optionally feed to LLM ──
+                if (hasAudio && isLoadAsrModel) {
+                    val audioFilePath = audioFile!!.absolutePath
+                    audioFile = null
+                    asrWrapper.transcribe(AsrTranscribeInput(audioFilePath, "en", null))
+                        .onSuccess { transcription ->
+                            val transcript = transcription.result.transcript ?: ""
+                            runOnUiThread {
+                                messages.add(Message("**Transcription (ASR)**\n\n$transcript\n\n*on-device speech recognition*", MessageType.ASSISTANT))
+                                reloadRecycleView()
+                            }
+                            // If LLM also loaded, auto-analyze the transcript
+                            if (isLoadLlmModel && transcript.isNotBlank()) {
+                                val ragPrompt = buildRagPrompt("Analyze this transcribed note: $transcript")
+                                chatList.add(ChatMessage(role = "user", ragPrompt))
+                                llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                                    .onSuccess { templateOutput ->
+                                        val asrSb = StringBuilder()
+                                        llmWrapper.generateStreamFlow(
+                                            templateOutput.formattedText,
+                                            GenerationConfigSample().toGenerationConfig(null)
+                                        ).collect { handleResult(asrSb, it) }
+                                    }
+                            }
+                        }.onFailure { error ->
+                            runOnUiThread {
+                                messages.add(Message("ASR Error: ${error.message}", MessageType.PROFILE))
+                                reloadRecycleView()
+                            }
                         }
-                        return@launch
-                    }
-                    val imagePath = savedImageFiles.last().absolutePath
-                    messages.add(Message("", MessageType.IMAGES, savedImageFiles))
-                    reloadRecycleView()
                     clearImages()
-                    cvWrapper.infer(imagePath).onSuccess { results ->
-                        Log.d("nfl", "infer result:$results")
-                        runOnUiThread {
-                            // Format OCR results nicely
-                            val ocrLines = results.map { result -> result.text }.toList()
+                    return@launch
+                }
+
+                // ── IMAGE PATH: OCR or VLM ──
+                if (hasImages) {
+                    // Priority 1: PaddleOCR (best for documents)
+                    if (isLoadCVModel) {
+                        val imagePath = savedImageFiles.last().absolutePath
+                        val imagesCopy = savedImageFiles.toList()
+                        clearImages()
+                        cvWrapper.infer(imagePath).onSuccess { results ->
+                            val ocrLines = results.map { it.text }.toList()
                             val fullText = ocrLines.joinToString(separator = "\n")
-                            val formattedContent = StringBuilder()
-                            formattedContent.append("**📄 OCR Extraction (PaddleOCR)**\n\n")
-                            formattedContent.append("```\n")
-                            formattedContent.append(fullText)
-                            formattedContent.append("\n```\n\n")
-                            formattedContent.append("*${ocrLines.size} text regions detected · on-device*")
-
-                            val content = formattedContent.toString()
-                            messages.add(Message(content, MessageType.ASSISTANT))
-                            reloadRecycleView()
-
-                            // Auto-save OCR extraction to health records
+                            runOnUiThread {
+                                val content = "**OCR Extraction (PaddleOCR)**\n\n```\n$fullText\n```\n\n*${ocrLines.size} text regions detected*"
+                                messages.add(Message(content, MessageType.ASSISTANT))
+                                reloadRecycleView()
+                            }
+                            // Auto-save to health vault
                             if (fullText.isNotBlank()) {
                                 val record = "## OCR Extraction\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$fullText"
                                 saveHealthRecord(record)
                             }
-                        }
-                    }.onFailure { error ->
-                        runOnUiThread {
-                            messages.add(Message("OCR Error: $error", MessageType.PROFILE))
-                            reloadRecycleView()
-                        }
-                        Log.d("nfl", "infer result error:$error")
-                    }
-                } else if (isLoadAsrModel) {
-                    if (audioFile == null) {
-                        runOnUiThread {
-                            Toast.makeText(this@MainActivity, "Record audio first (tap microphone)", Toast.LENGTH_SHORT)
-                                .show()
-                        }
-                    } else {
-                        val audioFilePath = audioFile!!.absolutePath
-                        asrWrapper.transcribe(
-                            AsrTranscribeInput(
-                                audioFilePath,
-                                "en",
-                                null
-                            )
-                        ).onSuccess { transcription ->
-                            runOnUiThread {
-                                val transcript = transcription.result.transcript ?: ""
-                                val formattedResponse = "**🎙️ Transcription (Parakeet ASR)**\n\n$transcript\n\n*on-device speech recognition*"
-                                messages.add(
-                                    Message(
-                                        formattedResponse,
-                                        MessageType.ASSISTANT
-                                    )
-                                )
-                                reloadRecycleView()
+                            // ── OCR → LLM pipeline: if LLM is also loaded, auto-analyze ──
+                            if (isLoadLlmModel && fullText.isNotBlank()) {
+                                runOnUiThread {
+                                    messages.add(Message("*Analyzing with LLM...*", MessageType.ASSISTANT))
+                                    reloadRecycleView()
+                                }
+                                val analysisPrompt = "Analyze this medical document extracted via OCR. Identify document type, key findings, medications, and action items:\n\n$fullText"
+                                val ragPrompt = buildRagPrompt(analysisPrompt)
+                                chatList.add(ChatMessage(role = "user", ragPrompt))
+                                llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                                    .onSuccess { templateOutput ->
+                                        val ocrSb = StringBuilder()
+                                        llmWrapper.generateStreamFlow(
+                                            templateOutput.formattedText,
+                                            GenerationConfigSample().toGenerationConfig(null)
+                                        ).collect { handleResult(ocrSb, it) }
+                                    }.onFailure { error ->
+                                        runOnUiThread {
+                                            messages.add(Message("LLM analysis error: ${error.message}", MessageType.PROFILE))
+                                            reloadRecycleView()
+                                        }
+                                    }
                             }
                         }.onFailure { error ->
                             runOnUiThread {
-                                messages.add(
-                                    Message(
-                                        "ASR Error: ${error.message}",
-                                        MessageType.PROFILE
-                                    )
-                                )
+                                messages.add(Message("OCR Error: $error", MessageType.PROFILE))
                                 reloadRecycleView()
                             }
                         }
+                        return@launch
                     }
+
+                    // Priority 2: VLM (for non-document images, X-rays, photos)
+                    if (isLoadVlmModel) {
+                        val contents = savedImageFiles.map { VlmContent("image", it.absolutePath) }.toMutableList()
+                        audioFile?.let { contents.add(VlmContent("audio", it.absolutePath)) }
+                        contents.add(VlmContent("text", inputString))
+                        audioFile = null
+                        clearImages()
+                        val sendMsg = VlmChatMessage(role = "user", contents = contents)
+                        vlmChatList.add(sendMsg)
+                        vlmWrapper.applyChatTemplate(vlmChatList.toTypedArray(), null, enableThinking)
+                            .onSuccess { result ->
+                                val baseConfig = GenerationConfigSample().toGenerationConfig(null)
+                                val configWithMedia = vlmWrapper.injectMediaPathsToConfig(vlmChatList.toTypedArray(), baseConfig)
+                                vlmWrapper.generateStreamFlow(inputString, configWithMedia)
+                                    .collect { handleResult(sb, it) }
+                            }.onFailure { error ->
+                                runOnUiThread {
+                                    messages.add(Message("VLM Error: ${error.message}", MessageType.PROFILE))
+                                    reloadRecycleView()
+                                }
+                            }
+                        return@launch
+                    }
+
+                    // No image-capable model loaded → guidance
+                    clearImages()
+                    runOnUiThread {
+                        streamResponseToChat(
+                            "**No image model loaded.**\n\n" +
+                            "Load **PaddleOCR** (recommended for documents) or **OmniNeural VLM** (for photos/X-rays).\n\n" +
+                            "Tap **Models** to download and load."
+                        )
+                    }
+                    return@launch
                 }
-                else if (isLoadEmbedderModel) {
-                    // Embedder inference — show embedding stats for input text
+
+                // ── TEXT-ONLY PATH ──
+                // Priority 1: LLM with RAG (the "brain")
+                if (isLoadLlmModel) {
+                    val ragPrompt = buildRagPrompt(inputString)
+                    Log.d(TAG, "RAG prompt (${ragPrompt.length} chars): ${ragPrompt.take(200)}...")
+                    chatList.add(ChatMessage(role = "user", ragPrompt))
+                    llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                        .onSuccess { templateOutput ->
+                            llmWrapper.generateStreamFlow(
+                                templateOutput.formattedText,
+                                GenerationConfigSample().toGenerationConfig(null)
+                            ).collect { handleResult(sb, it) }
+                        }.onFailure { error ->
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    clearImages()
+                    return@launch
+                }
+
+                // Priority 2: Embedder (show embedding stats — utility mode)
+                if (isLoadEmbedderModel) {
                     val texts = inputString.split("|").map { it.trim() }.toTypedArray()
                     embedderWrapper!!.embed(texts, EmbeddingConfig()).onSuccess { embedResult ->
                         runOnUiThread {
                             val result = StringBuilder()
                             val allEmbeddings = embedResult.embeddings
                             val embeddingDim = allEmbeddings.size / texts.size
-
                             texts.forEachIndexed { idx, text ->
                                 val start = idx * embeddingDim
                                 val end = start + embeddingDim
                                 val embedding = allEmbeddings.slice(start until end)
-
                                 val mean = embedding.average()
-                                val variance = embedding.map { (it - mean) * (it - mean) }.average()
-
-                                result.append("Text ${idx + 1}: \"$text\"\n")
-                                result.append("Embedding dimension: $embeddingDim\n")
-                                result.append("Mean: ${"%.4f".format(mean)}\n")
-                                result.append("Variance: ${"%.4f".format(variance)}\n")
-                                result.append("First 5 values: [")
-                                result.append(
-                                    embedding.take(5).joinToString(", ") { "%.4f".format(it) })
-                                result.append("...]\n\n")
+                                result.append("\"$text\" → ${embeddingDim}d, mean=${"%.4f".format(mean)}\n")
                             }
-
                             messages.add(Message(result.toString(), MessageType.ASSISTANT))
                             reloadRecycleView()
                         }
                     }.onFailure { error ->
                         runOnUiThread {
-                            messages.add(Message("Error: ${error.message}", MessageType.PROFILE))
+                            messages.add(Message("Embedder Error: ${error.message}", MessageType.PROFILE))
                             reloadRecycleView()
                         }
                     }
+                    clearImages()
+                    return@launch
                 }
-                else if (isLoadRerankerModel) {
-                    // Reranker input format: "query\ndoc1\ndoc2\ndoc3..."
-                    // First line is query, remaining lines are documents
-                    val query = inputString.split("\n")[0]  // Get first line as query
-                    val documents =
-                        inputString.split("\n").drop(1).toTypedArray()  // Get rest as docs
+
+                // Priority 3: Reranker (utility mode)
+                if (isLoadRerankerModel) {
+                    val query = inputString.split("\n")[0]
+                    val documents = inputString.split("\n").drop(1).toTypedArray()
                     rerankerWrapper.rerank(query, documents, RerankConfig())
                         .onSuccess { rerankerResult ->
                             runOnUiThread {
-                                val result = StringBuilder()
-                                result.append("Rerank Results:\n")
-                                // Sort by score descending to show best matches first
+                                val result = StringBuilder("Rerank Results:\n")
                                 rerankerResult.scores?.withIndex()?.sortedByDescending { it.value }
                                     ?.forEach { (idx, score) ->
-                                        result.append("${idx + 1}. Score: ${"%.4f".format(score)}\n")
-                                        result.append("   ${documents[idx]}\n\n")
+                                        result.append("${idx + 1}. ${"%.4f".format(score)}: ${documents[idx]}\n")
                                     }
                                 messages.add(Message(result.toString(), MessageType.ASSISTANT))
                                 reloadRecycleView()
                             }
                         }.onFailure { error ->
                             runOnUiThread {
-                                "Error: ${error.message}".also {
-                                    messages.add(Message(it, MessageType.PROFILE))
-                                    reloadRecycleView()
-                                }
+                                messages.add(Message("Error: ${error.message}", MessageType.PROFILE))
+                                reloadRecycleView()
                             }
                         }
-                } else if (isLoadVlmModel) {
-                    val contents = savedImageFiles.map {
-                        VlmContent("image", it.absolutePath)
-                    }.toMutableList()
-                    audioFile?.let {
-                        contents.add(VlmContent("audio", it.absolutePath))
-                    }
-                    contents.add(VlmContent("text", inputString))
-                    audioFile = null
                     clearImages()
-                    val sendMsg = VlmChatMessage(role = "user", contents = contents)
-                    // VlmContentTransfer(
-                    //     this@MainActivity, VlmContent(
-                    //         "image", inputString
-                    //     )
-                    // ).forUrl()
+                    return@launch
+                }
 
-                    // vlmChatList.clear()
-                    vlmChatList.add(sendMsg)
-
-                    Log.d(TAG, "before apply chat template:$vlmChatList")
-                    vlmWrapper.applyChatTemplate(vlmChatList.toTypedArray(), tools, enableThinking)
-                        .onSuccess { result ->
-                            Log.d(TAG, "vlm chat template:${result.formattedText}")
-                            val baseConfig =
-                                GenerationConfigSample().toGenerationConfig(grammarString)
-                            val configWithMedia = vlmWrapper.injectMediaPathsToConfig(
-                                vlmChatList.toTypedArray(),
-                                baseConfig
-                            )
-
-                            Log.d(TAG, "Config has ${configWithMedia.imageCount} images")
-
-                            vlmWrapper.generateStreamFlow(
-                                if (isNpu || true) inputString else result.formattedText,
-                                configWithMedia  // Use the updated config with media paths
-                            ).collect { handleResult(sb, it) }
-                        }.onFailure {
-                            runOnUiThread {
-                                Toast.makeText(
-                                    this@MainActivity, it.message, Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                } else {
-                    // RAG: Augment user query with relevant health vault context
-                    val ragPrompt = buildRagPrompt(inputString)
-                    Log.d(TAG, "RAG prompt (${ragPrompt.length} chars): ${ragPrompt.take(200)}...")
-                    chatList.add(ChatMessage(role = "user", ragPrompt))
-                    // Apply chat template and generate
-                    llmWrapper.applyChatTemplate(
-                        chatList.toTypedArray(),
-                        tools,
-                        enableThinking
-                    ).onSuccess { templateOutput ->
-                        Log.d(TAG, "chat template:${templateOutput.formattedText}")
-                        llmWrapper.generateStreamFlow(
-                            templateOutput.formattedText,
-                            GenerationConfigSample().toGenerationConfig(grammarString)
-                        ).collect { streamResult ->
-                            handleResult(sb, streamResult)
-                        }
-                    }.onFailure { error ->
-                        runOnUiThread {
-                            Toast.makeText(
-                                this@MainActivity, error.message, Toast.LENGTH_SHORT
-                            ).show()
-                        }
+                // VLM without image → redirect
+                if (isLoadVlmModel) {
+                    runOnUiThread {
+                        messages.add(Message("VLM is a vision model — attach an image first.\nFor text Q&A, also load an LLM (Qwen3-4B).", MessageType.ASSISTANT))
+                        reloadRecycleView()
                     }
+                    clearImages()
+                    return@launch
+                }
+
+                // OCR without image → redirect
+                if (isLoadCVModel) {
+                    runOnUiThread {
+                        messages.add(Message("OCR processes images — attach a document photo first.\nFor text Q&A, also load an LLM (Qwen3-4B).", MessageType.ASSISTANT))
+                        reloadRecycleView()
+                    }
+                    clearImages()
+                    return@launch
                 }
 
                 clearImages()
             }
-
         }
 
         /**
@@ -2670,7 +2677,7 @@ space ::= | " " | "\n" | "\r" | "\t"
                 Toast.makeText(this@MainActivity, "model not loaded", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            // Unload model and cleanup
+            // Unload ALL loaded models
             val handleUnloadResult = fun(result: Int) {
                 resetLoadState()
                 runOnUiThread {
@@ -2693,38 +2700,18 @@ space ::= | " " | "\n" | "\r" | "\t"
                 }
             }
             modelScope.launch {
-                if (isLoadVlmModel) {
-                    vlmWrapper.stopStream()
-                    vlmWrapper.destroy()
-                    vlmChatList.clear()
-                    // TODO:
-                    handleUnloadResult(0)
-                } else if (isLoadEmbedderModel) {
-                    // ADD: Unload embedder
-                    embedderWrapper!!.destroy()
-                    handleUnloadResult(0)
-                } else if (isLoadRerankerModel) {
-                    // ADD: Unload reranker
-                    handleUnloadResult(rerankerWrapper.destroy())
-                } else if (isLoadCVModel) {
-                    // ADD: Unload CV model
-                    cvWrapper.destroy()
-                    // TODO:
-                    handleUnloadResult(0)
-                } else if (isLoadAsrModel) {
-                    // ADD: Unload ASR model
-                    asrWrapper.destroy()
-                    // TODO:
-                    handleUnloadResult(0)
-                } else if (isLoadLlmModel) {
-                    llmWrapper.stopStream()
-                    llmWrapper.destroy()
-                    chatList.clear()
-                    // TODO:
-                    handleUnloadResult(0)
-                } else {
-                    handleUnloadResult(0)
+                // Multi-model: unload ALL loaded models
+                try {
+                    if (isLoadVlmModel) { vlmWrapper.stopStream(); vlmWrapper.destroy(); vlmChatList.clear() }
+                    if (isLoadLlmModel) { llmWrapper.stopStream(); llmWrapper.destroy(); chatList.clear() }
+                    if (isLoadCVModel) { cvWrapper.destroy() }
+                    if (isLoadEmbedderModel) { embedderWrapper?.destroy() }
+                    if (isLoadAsrModel) { asrWrapper.destroy() }
+                    if (isLoadRerankerModel) { rerankerWrapper.destroy() }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error during unload: ${e.message}")
                 }
+                handleUnloadResult(0)
             }
         }
         btnStop.setOnClickListener {
@@ -2950,9 +2937,22 @@ space ::= | " " | "\n" | "\r" | "\t"
     }
 
     private fun openGallery() {
-        val intent = Intent(Intent.ACTION_PICK, null)
-        intent.setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
-        startActivityForResult(intent, 1)
+        // Use ACTION_GET_CONTENT for broad file access (Gallery + Downloads + Files)
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.type = "image/*"
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        // Also trigger MediaStore scan for adb-pushed files
+        try {
+            val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS
+            )
+            if (downloadDir.exists()) {
+                android.media.MediaScannerConnection.scanFile(
+                    this, arrayOf(downloadDir.absolutePath), null, null
+                )
+            }
+        } catch (e: Exception) { /* ignore scan errors */ }
+        startActivityForResult(Intent.createChooser(intent, "Select Image"), 1)
     }
 
     private fun openModelFilePicker() {

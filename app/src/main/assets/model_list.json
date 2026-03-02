@@ -1,7 +1,7 @@
 [
   {
     "id": "Qwen3-4B-Instruct-NPU",
-    "displayName": "Qwen3-4B (LLM \uD83D\uDCAC) ★",
+    "displayName": "Qwen3-4B Instruct",
     "modelName": "Qwen3-4B-Instruct-2507",
     "type": "chat",
     "versionCode": 1,
@@ -10,7 +10,7 @@
   },
   {
     "id": "paddleocr-npu",
-    "displayName": "PaddleOCR (OCR \uD83D\uDCC4)",
+    "displayName": "PaddleOCR",
     "modelName": "paddleocr",
     "type": "paddleocr",
     "versionCode": 1,
@@ -19,7 +19,7 @@
   },
   {
     "id": "Llama3.2-3B-NPU-Turbo",
-    "displayName": "Llama-3.2-3B Turbo (LLM \uD83D\uDCAC)",
+    "displayName": "Llama-3.2-3B Turbo",
     "modelName": "Llama3.2-3B-NPU-Turbo",
     "type": "chat",
     "versionCode": 1,
@@ -28,7 +28,7 @@
   },
   {
     "id": "OmniNeural-4B",
-    "displayName": "OmniNeural-4B (VLM \uD83D\uDC41\uFE0F ⚠️)",
+    "displayName": "OmniNeural-4B",
     "modelName": "omni-neural",
     "type": "multimodal",
     "versionCode": 1,
@@ -37,7 +37,7 @@
   },
   {
     "id": "parakeet-tdt-npu",
-    "displayName": "Parakeet ASR (\uD83C\uDF99\uFE0F Speech)",
+    "displayName": "Parakeet ASR",
     "modelName": "parakeet-tdt-0.6b-v3-npu",
     "type": "asr",
     "versionCode": 1,
@@ -46,7 +46,7 @@
   },
   {
     "id": "embeddinggemma-npu",
-    "displayName": "EmbedGemma (Embed \uD83D\uDD17)",
+    "displayName": "EmbedGemma",
     "modelName": "embeddinggemma-300m-npu",
     "type": "embedder",
     "versionCode": 1,
@@ -55,7 +55,7 @@
   },
   {
     "id": "Llama-3.2-1B-Instruct-GGUF",
-    "displayName": "Llama-3.2-1B GGUF (CPU)",
+    "displayName": "Llama-3.2-1B (CPU)",
     "modelName": "Llama-3.2-1B-Instruct-Q4_0.gguf",
     "type": "chat",
     "versionCode": 1,
@@ -64,7 +64,7 @@
   },
   {
     "id": "Qwen3-4B-GGUF",
-    "displayName": "Qwen3-4B GGUF (CPU)",
+    "displayName": "Qwen3-4B (CPU)",
     "modelName": "Qwen3-4B-Q4_0.gguf",
     "type": "chat",
     "versionCode": 1,
