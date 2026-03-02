@@ -5,32 +5,64 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Privacy Policy — Health Passport</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.7;
-            color: #1a1a1a;
-            max-width: 720px;
-            margin: 0 auto;
-            padding: 2rem 1.5rem;
-            background: #fafafa;
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #070707; --surface: #0d0d0d; --card: #111111;
+            --border: #1a1a1a; --border-card: #1f1f1f;
+            --text-1: #f2f2f2; --text-2: #808080; --text-3: #4d4d4d;
+            --green: #10b981; --cyan: #22d3ee;
         }
-        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #0d47a1; }
-        h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; color: #1565c0; }
-        p, li { margin-bottom: 0.8rem; }
-        ul { padding-left: 1.5rem; }
-        .date { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
-        a { color: #1565c0; }
-        .highlight { background: #e3f2fd; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
-        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.85rem; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text-1);
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+        a { color: var(--green); text-decoration: none; }
+        a:hover { color: var(--cyan); }
+        h1 { font-size: 1.75rem; font-weight: 300; letter-spacing: -0.02em; color: var(--text-1); margin-bottom: 0.4rem; }
+        .meta { font-size: 0.75rem; color: var(--text-3); letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2.5rem; }
+        h2 {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-3);
+            margin-top: 2.5rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        p { font-size: 0.875rem; color: var(--text-2); margin-bottom: 0.85rem; }
+        ul { padding-left: 1.25rem; margin-bottom: 0.85rem; }
+        li { font-size: 0.875rem; color: var(--text-2); margin-bottom: 0.4rem; }
+        strong { color: var(--text-1); font-weight: 500; }
+        .callout {
+            border: 1px solid var(--border-card);
+            background: var(--surface);
+            border-left: 2px solid var(--green);
+            padding: 0.9rem 1.1rem;
+            border-radius: 6px;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+            color: var(--text-2);
+        }
+        .callout strong { color: var(--green); }
+        footer { margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--text-3); font-size: 0.75rem; line-height: 1.8; }
+        footer a { color: var(--text-3); }
+        footer a:hover { color: var(--green); }
     </style>
 </head>
 <body>
     <h1>Privacy Policy</h1>
-    <p class="date">Last updated: March 2, 2026</p>
+    <p class="meta">Health Passport &middot; Last updated March 2, 2026</p>
 
-    <div class="highlight">
-        <strong>TL;DR:</strong> Health Passport processes everything on your device. We do not collect, transmit, or store any of your data on external servers. Your health records never leave your phone.
+    <div class="callout">
+        <strong>TL;DR</strong> &mdash; Health Passport processes everything on your device. We do not collect, transmit, or store any data on external servers. Your health records never leave your phone.
     </div>
 
     <h2>1. Overview</h2>
@@ -114,8 +146,9 @@
     </ul>
 
     <footer>
-        <p>Health Passport is an open-source project built for the Qualcomm × Nexa AI On-Device Builder Bounty Program.</p>
-        <p>&copy; 2026 Carl Kho. All rights reserved.</p>
+        <p>Health Passport &mdash; open source at <a href="https://github.com/CarlKho-Minerva/health-passport-android">github.com/CarlKho-Minerva/health-passport-android</a></p>
+        <p>Built for the Qualcomm &times; Nexa AI On-Device Builder Bounty &middot; &copy; 2026 Carl Kho</p>
+        <p style="margin-top:0.5rem"><a href="index.html">Home</a> &middot; <a href="support.html">Support</a></p>
     </footer>
 </body>
 </html>

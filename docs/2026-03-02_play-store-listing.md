@@ -1,144 +1,209 @@
-# Play Store Listing — Health Passport
+# Health Passport — Play Store Listing
 
-## App Details
-- **Package name:** `com.carlkho.healthpassport`
-- **App name:** Health Passport
-- **Category:** Medical
-- **Default language:** English (United States)
-- **Free or Paid:** Free
+```
+Package      com.carlkho.healthpassport
+Category     Medical
+Language     English (United States)
+Price        Free
+```
 
 ---
 
-## Short Description (80 chars max)
+## Short Description  `80 chars`
+
 ```
-AI-powered medical document scanner & health records vault — runs 100% on-device
+On-device AI medical scanner & health vault. Zero cloud. Snapdragon NPU.
 ```
 
-## Full Description (4000 chars max)
+---
+
+## Full Description  `4000 chars`
+
 ```
-Health Passport — Your AI Health Records, 100% On-Device
+HEALTH PASSPORT
 
-Health Passport uses on-device AI to scan, categorize, and store your medical documents — with zero cloud dependency. Your health data never leaves your phone.
+On-device AI that scans, organizes, and answers questions about your health
+documents. Zero cloud dependency. Your data never leaves your device.
 
-🔍 SCAN MEDICAL DOCUMENTS
-Point your camera at prescriptions, lab results, insurance cards, or any medical document. Our on-device Vision Language Model (OmniNeural-4B) reads and extracts structured data instantly.
 
-📋 ORGANIZED HEALTH VAULT
-All your health records organized by body system (Head/Eyes/ENT, Cardiovascular, etc.), timeline, medications, and protocols. Browse, search, and edit your records anytime.
+SCAN MEDICAL DOCUMENTS
 
-💬 ASK QUESTIONS ABOUT YOUR HEALTH
-Chat with your health vault using on-device AI. Ask "What are my current medications?" or "Show my eye prescription history" and get instant answers from YOUR data.
+Point your camera at any medical document — prescriptions, lab results,
+insurance cards, clinical notes. OmniNeural-4B Vision Language Model reads
+and extracts structured data entirely on your Snapdragon NPU.
 
-🔒 100% PRIVATE — NO CLOUD
-All AI processing happens on your Snapdragon-powered device using Qualcomm NPU acceleration. Your medical records, prescriptions, and health data NEVER leave your phone. No account required. No data collection.
 
-🎙️ CLINIC TRANSCRIPTION
-Record and transcribe clinic visits with on-device speech recognition. Auto-files transcripts to your health vault.
+HEALTH VAULT
 
-⚡ POWERED BY
-• Qualcomm Snapdragon NPU (Neural Processing Unit)
-• Nexa AI On-Device SDK
-• OmniNeural-4B Vision Language Model
-• Parakeet ASR for speech recognition
-• PaddleOCR for document text extraction
+Records organized by body system, timeline, medications, and protocols.
+Browse, search, and edit offline — no account, no sync, no server.
 
-📱 REQUIREMENTS
-• Android 8.1+ (API 27)
-• Snapdragon 8 Gen 2 or newer recommended for NPU features
-• 4GB+ RAM recommended
-• ~2GB storage for AI models (downloaded on first use)
 
-Built for the Qualcomm × Nexa AI On-Device Builder Bounty Program.
-Open source: https://github.com/CarlKho-Minerva/health-passport-android
+ASK YOUR DATA
+
+"What are my current medications?"
+"Summarize my cardiac history."
+"When was my last eye exam?"
+
+Answered instantly by on-device AI querying your personal vault.
+Zero server round-trips. Zero latency. Zero exposure.
+
+
+CLINIC TRANSCRIPTION
+
+Record clinic visits. Parakeet-TDT ASR transcribes speech on-device and
+auto-files the transcript to your vault.
+
+
+DOCUMENT OCR
+
+PaddleOCR extracts text from any medical document — prescriptions, lab
+PDFs, insurance cards. Fully offline.
+
+
+ARCHITECTURE
+
+· Qualcomm Snapdragon NPU acceleration
+· Nexa AI On-Device SDK v0.0.24
+· OmniNeural-4B — Vision Language Model
+· Parakeet-TDT — Speech Recognition
+· PaddleOCR — Document Extraction
+· EmbedGemma — Semantic Search (RAG)
+· GGUF CPU fallbacks for non-Snapdragon devices
+
+
+PRIVACY
+
+No account. No cloud. No analytics. No data collection. All AI processing
+is local. Android file-based encryption at rest. Uninstall to delete all.
+
+
+REQUIREMENTS
+
+· Android 8.1+ (API 27)
+· Snapdragon 8 Gen 2 or newer for full NPU acceleration
+· 4 GB RAM minimum recommended
+· ~2 GB storage for AI models (downloaded on first use)
+
+
+Built for the Qualcomm × Nexa AI On-Device Builder Bounty.
+Source: github.com/CarlKho-Minerva/health-passport-android
 ```
 
 ---
 
 ## URLs
-- **Privacy Policy:** https://carlkho-minerva.github.io/health-passport-android/privacy-policy.html
-- **Support URL:** https://carlkho-minerva.github.io/health-passport-android/support.html
-- **Website:** https://carlkho-minerva.github.io/health-passport-android/
+
+```
+Privacy Policy   https://carlkho-minerva.github.io/health-passport-android/privacy-policy.html
+Support          https://carlkho-minerva.github.io/health-passport-android/support.html
+Website          https://carlkho-minerva.github.io/health-passport-android/
+```
 
 ---
 
-## Release Notes (v1.0)
+## Release Notes  `v1.0`
+
 ```
 v1.0 — Initial Release
-• On-device medical document scanning with OmniNeural-4B VLM
-• Health records vault organized by body system
-• AI chat for health questions (100% on-device, RAG over vault)
-• Clinic visit transcription with Parakeet ASR
-• OCR document extraction with PaddleOCR
-• Zero cloud dependency — all data stays on your phone
-• Supports Snapdragon 8 Gen 2+ NPU acceleration
-• CPU fallback models for non-Snapdragon devices
+
+· On-device medical document scanning — OmniNeural-4B VLM
+· Health records vault organized by body system
+· AI chat over vault — 100% on-device RAG
+· Clinic transcription — Parakeet-TDT ASR
+· Document OCR — PaddleOCR
+· Semantic search — EmbedGemma
+· Zero cloud — all data stays on-device
+· Snapdragon 8 Gen 2+ NPU acceleration
+· GGUF CPU fallbacks for non-Snapdragon devices
 ```
 
 ---
 
-## Content Rating Questionnaire
-- Violence: **No**
-- Sexuality: **No**
-- Language: **No**
-- Controlled substances: **No**
-- User-generated content: **No**
-- Personal information: **Yes** (health data stored locally only)
-- Location: **No**
-- Ads: **No**
-- Expected rating: **Everyone** / **Low Maturity**
+## Content Rating
+
+```
+Violence                  No
+Sexuality                 No
+Language                  No
+Controlled substances     No
+User-generated content    No
+Personal information      Yes — health data, stored locally only
+Location                  No
+Ads                       No
+Expected rating           Everyone / Low Maturity
+```
 
 ## Data Safety
-- **Does your app collect or share any user data?** → No
-- **Is all data processed on-device?** → Yes
-- **Encryption:** Data at rest on device storage (Android file-based encryption)
-- **Data deletion:** User can delete via Settings → Apps → Clear Data, or uninstall
+
+```
+Collects or shares user data    No
+All processing on-device        Yes
+Encryption                      Android file-based encryption at rest
+Deletion                        Settings → Apps → Clear Data, or uninstall
+```
 
 ---
 
-## Required Assets Checklist
-- [ ] App icon (512×512 PNG, 32-bit, no alpha) → Can export from Android Studio or create manually
-- [ ] Feature graphic (1024×500 PNG/JPEG) → Create in Canva/Figma
-- [ ] Phone screenshots (min 2, 16:9 or 9:16, 320-3840px) → Capture from QDC
-- [ ] Tablet screenshots (optional)
-- [ ] Video (optional but recommended) → YouTube: https://www.youtube.com/watch?v=2JNhoXNvsCo
+## Assets Checklist
+
+```
+[ ] App icon         512×512 PNG, 32-bit, no alpha
+[ ] Feature graphic  1024×500 PNG/JPEG
+[ ] Screenshots      2+ phone, 9:16, 320–3840px  — capture from QDC device
+[ ] Video            optional — https://www.youtube.com/watch?v=2JNhoXNvsCo
+```
 
 ---
 
-## Step-by-step Play Console Upload
+## Play Console Upload — Step by Step
 
-### 1. Go to https://play.google.com/console
-### 2. Click "Create app"
-### 3. Fill:
-- App name: Health Passport
-- Language: English (US)
-- App or game: App
-- Free or paid: Free
-- Check all declarations
-### 4. Complete "Set up your app" dashboard:
-- App access → All functionality available without special access
-- Ads → No ads
-- Content rating → Fill questionnaire (answers above)
-- Target audience → 18+
-- News app → No
-- COVID-19 contact tracing/status → No
-- Data safety → Fill (see above)
-- Government apps → No
-### 5. Store listing:
-- Upload app icon
-- Upload feature graphic
-- Upload 2+ phone screenshots
-- Paste short description
-- Paste full description
-- Set Privacy Policy URL
-### 6. Go to Production → Create new release
-- Upload app-release.apk (or .aab)
-- Add release notes
-- Review → Start rollout
+### Step 1 — Create app
+```
+https://play.google.com/console → Create app
 
-### Alternative: Internal Testing First
-- Go to Testing → Internal testing
-- Create a release
-- Add your email as tester
-- Upload APK → publish
-- Test the private link
-- Then promote to production
+  App name      Health Passport
+  Language      English (US)
+  Type          App
+  Price         Free
+  Declarations  Check all
+```
+
+### Step 2 — Complete setup dashboard
+```
+App access          All functionality available without special access
+Ads                 No ads
+Content rating      Fill questionnaire → answers above
+Target audience     18+
+News app            No
+COVID-19 tracing    No
+Data safety         Fill → answers above
+Government app      No
+```
+
+### Step 3 — Store listing
+```
+Upload app icon
+Upload feature graphic
+Upload 2+ screenshots
+Paste short description
+Paste full description
+Set Privacy Policy URL
+```
+
+### Step 4 — Production release
+```
+Production → Create new release
+Upload app-release.apk
+Add release notes
+Review → Start rollout to production
+```
+
+### Alternative — Internal testing first (recommended)
+```
+Testing → Internal testing → Create release
+Add your email as tester
+Upload APK → publish
+Verify install via private link
+Promote to Production when ready
+```
