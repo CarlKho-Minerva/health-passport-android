@@ -61,7 +61,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="nGpuLayers 1~999 : "
+            android:text="GPU layers 1-99 : "
             android:textColor="@color/text_secondary" />
 
         <EditText
@@ -70,8 +70,8 @@
             android:layout_height="wrap_content"
             android:gravity="right"
             android:inputType="number"
-            android:maxLength="3"
-            android:text="999"
+            android:maxLength="2"
+            android:text="35"
             android:textColor="@color/text_primary" />
     </LinearLayout>
 

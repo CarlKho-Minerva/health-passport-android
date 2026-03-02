@@ -528,7 +528,7 @@
         android:gravity="center"
         android:orientation="vertical"
         android:background="@drawable/bg_overlay_dark"
-        android:visibility="invisible"
+        android:visibility="gone"
         tools:visibility="gone">
 
         <ProgressBar

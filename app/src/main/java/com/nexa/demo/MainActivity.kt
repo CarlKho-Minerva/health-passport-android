@@ -1910,22 +1910,24 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
                 // Show plugin selection dialog for manual model
                 val dialogBinding = DialogSelectPluginIdBinding.inflate(layoutInflater)
-                // Per Nexa tutorial: GGUF models MUST use "cpu_gpu" plugin on Snapdragon
                 dialogBinding.rbCpu.visibility = View.VISIBLE
-                dialogBinding.rbCpu.text = "CPU+GPU (GGUF)"
-                dialogBinding.rbCpu.isChecked = true  // Default to cpu_gpu for GGUF
+                dialogBinding.rbCpu.text = "CPU"
                 dialogBinding.rbGpu.visibility = View.VISIBLE
                 dialogBinding.rbNpu.visibility = View.VISIBLE
-
-                var selectedPluginId = "cpu_gpu"  // Tutorial: GGUF → cpu_gpu
+                // Default: NPU on Snapdragon, CPU otherwise
+                var selectedPluginId = if (isSnapdragonDevice()) "npu" else "cpu"
+                if (isSnapdragonDevice()) dialogBinding.rbNpu.isChecked = true
+                else dialogBinding.rbCpu.isChecked = true
                 var nGpuLayers = 0
+                dialogBinding.llGpuLayers.visibility = View.GONE
+                dialogBinding.etGpuLayers.setText("35")
 
                 dialogBinding.rgSelectPluginId.setOnCheckedChangeListener { group, checkedId ->
                     selectedPluginId = when (checkedId) {
-                        R.id.rb_cpu -> "cpu_gpu"  // GGUF uses cpu_gpu per tutorial
+                        R.id.rb_cpu -> "cpu"
                         R.id.rb_gpu -> "gpu"
-                        R.id.rb_npu -> "npu"  // For Nexa proprietary models
-                        else -> "cpu_gpu"
+                        R.id.rb_npu -> "npu"
+                        else -> "cpu"
                     }
                     dialogBinding.llGpuLayers.visibility =
                         if (checkedId == R.id.rb_gpu) View.VISIBLE else View.GONE
@@ -1934,7 +1936,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                 val dialogOnClickListener = object : CustomDialogInterface.OnClickListener() {
                     override fun onClick(dialog: DialogInterface?, which: Int) {
                         if (dialogBinding.llGpuLayers.visibility == View.VISIBLE) {
-                            val layers = dialogBinding.etGpuLayers.text.toString().toIntOrNull() ?: 0
+                            val layers = (dialogBinding.etGpuLayers.text.toString().toIntOrNull() ?: 0)
+                                .coerceIn(1, 99)
                             if (layers == 0) {
                                 Toast.makeText(
                                     this@MainActivity,
@@ -1959,12 +1962,15 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     }
                 }
 
-                val alertDialog = AlertDialog.Builder(this).setView(dialogBinding.root)
-                    .setNegativeButton("cancel", dialogOnClickListener)
-                    .setPositiveButton("sure", dialogOnClickListener)
+                val alertDialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                    .setView(dialogBinding.root)
+                    .setNegativeButton("Cancel", dialogOnClickListener)
+                    .setPositiveButton("Load", dialogOnClickListener)
                     .setCancelable(false)
                     .create()
                 alertDialog.show()
+                alertDialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.parseColor("#10b981"))
+                alertDialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.parseColor("#808080"))
                 dialogOnClickListener.resetPositiveButton(alertDialog)
                 return@setOnClickListener
             }
@@ -1998,27 +2004,42 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
             val supportPluginIds = selectModelData.getSupportPluginIds()
             Log.d(TAG, "support plugin_id:$supportPluginIds")
-            var modelDataPluginId = "cpu_gpu"  // Tutorial: GGUF → cpu_gpu on Snapdragon
+            var modelDataPluginId = "cpu"
             var nGpuLayers = 0
-            if (supportPluginIds.size > 1) {
+
+            // ── Smart default: Snapdragon → NPU, else CPU ──
+            val isSnapdragon = isSnapdragonDevice()
+            if (isSnapdragon && supportPluginIds.contains("npu")) {
+                // Snapdragon with NPU support — skip dialog, load directly with NPU
+                modelDataPluginId = "npu"
+                Log.d(TAG, "Snapdragon detected, auto-selecting NPU for ${selectModelData.id}")
+                Toast.makeText(this@MainActivity, "Loading with NPU (Snapdragon detected)", Toast.LENGTH_SHORT).show()
+                loadModel(selectModelData, modelDataPluginId, 0)
+            } else if (supportPluginIds.size > 1) {
                 val dialogBinding = DialogSelectPluginIdBinding.inflate(layoutInflater)
                 supportPluginIds.forEach {
                     when (it) {
                         "cpu" -> {
                             dialogBinding.rbCpu.visibility = View.VISIBLE
+                            dialogBinding.rbCpu.text = "CPU"
                             dialogBinding.rbCpu.isChecked = true
                         }
 
                         "gpu" -> {
                             dialogBinding.rbGpu.visibility = View.VISIBLE
+                            dialogBinding.rbGpu.text = "GPU"
                         }
 
                         "npu" -> {
                             dialogBinding.rbNpu.visibility = View.VISIBLE
+                            dialogBinding.rbNpu.text = "NPU"
                             dialogBinding.rbNpu.isChecked = true
                         }
                     }
                 }
+                // Hide GPU layers by default — only show when GPU selected
+                dialogBinding.llGpuLayers.visibility = View.GONE
+                dialogBinding.etGpuLayers.setText("35")  // Safe default instead of 999
                 dialogBinding.rgSelectPluginId.setOnCheckedChangeListener { group, checkedId ->
                     dialogBinding.llGpuLayers.visibility =
                         if (checkedId == R.id.rb_gpu) View.VISIBLE else View.GONE
@@ -2039,7 +2060,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
 
                         nGpuLayers = 0
                         if (dialogBinding.llGpuLayers.visibility == View.VISIBLE) {
-                            nGpuLayers = dialogBinding.etGpuLayers.text.toString().toIntOrNull() ?: 0
+                            nGpuLayers = (dialogBinding.etGpuLayers.text.toString().toIntOrNull() ?: 0)
+                                .coerceIn(1, 99)  // Clamp to safe range
                             if (nGpuLayers == 0) {
                                 Toast.makeText(
                                     this@MainActivity,
@@ -2063,12 +2085,17 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     }
 
                 }
-                val alertDialog = AlertDialog.Builder(this).setView(dialogBinding.root)
-                    .setNegativeButton("cancel", dialogOnClickListener)
-                    .setPositiveButton("sure", dialogOnClickListener)
+                val alertDialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog)
+                    .setView(dialogBinding.root)
+                    .setNegativeButton("Cancel", dialogOnClickListener)
+                    .setPositiveButton("Load", dialogOnClickListener)
                     .setCancelable(false)
                     .create()
                 alertDialog.show()
+                // Style dialog buttons to match app theme
+                alertDialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(android.graphics.Color.parseColor("#10b981"))
+                alertDialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(android.graphics.Color.parseColor("#808080"))
+                alertDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
                 dialogOnClickListener.resetPositiveButton(alertDialog)
             } else {
                 // Single plugin available - use it directly

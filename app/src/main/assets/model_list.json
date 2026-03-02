@@ -5,7 +5,7 @@
     "modelName": "omni-neural",
     "type": "multimodal",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/OmniNeural-4B-mobile"
   },
   {
@@ -14,7 +14,7 @@
     "modelName": "Qwen3-4B-Instruct-2507",
     "type": "chat",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/Qwen3-4B-Instruct-2507-npu-mobile"
   },
   {
@@ -23,7 +23,7 @@
     "modelName": "Llama3.2-3B-NPU-Turbo",
     "type": "chat",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/Llama3.2-3B-NPU-Turbo-NPU-mobile"
   },
   {
@@ -32,7 +32,7 @@
     "modelName": "paddleocr",
     "type": "paddleocr",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/paddleocr-npu-mobile"
   },
   {
@@ -41,7 +41,7 @@
     "modelName": "parakeet-tdt-0.6b-v3-npu",
     "type": "asr",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/parakeet-tdt-0.6b-v3-npu-mobile"
   },
   {
@@ -50,7 +50,7 @@
     "modelName": "embeddinggemma-300m-npu",
     "type": "embedder",
     "versionCode": 1,
-    "pluginIds": 17,
+    "pluginIds": 273,
     "baseUrl": "https://huggingface.co/NexaAI/embeddinggemma-300m-npu-mobile"
   },
   {

@@ -240,7 +240,16 @@ fun ModelData.allModelFilesExist(modelDir: File): Boolean {
 }
 
 fun ModelData.getNonExistModelFile(modelDir: File): String? {
-    this.downloadableFiles(modelDir).forEach {
+    val staticFiles = this.downloadableFiles(modelDir)
+    // For dynamic-fetch models (baseUrl set, no static files), check directory contents
+    if (staticFiles.isEmpty() && !baseUrl.isNullOrEmpty()) {
+        return if (modelDir.exists() && (modelDir.listFiles()?.size ?: 0) > 0) {
+            null  // Directory has files -> downloaded
+        } else {
+            modelDir.absolutePath  // Empty or missing -> needs download
+        }
+    }
+    staticFiles.forEach {
         if (!(it.file.exists() && it.file.length() > 0)) {
             return it.file.absolutePath.replace("/data/user/0", "/data/data")
         }
@@ -287,7 +296,8 @@ fun ModelData.getSupportPluginIds(): ArrayList<String> {
 fun ModelData.isNpuModel(): Boolean {
     return id.contains("NPU", ignoreCase = true) || 
            id.contains("npu", ignoreCase = true) ||
-           modelName.endsWith(".nexa", ignoreCase = true)
+           modelName.endsWith(".nexa", ignoreCase = true) ||
+           (!baseUrl.isNullOrEmpty() && files.isNullOrEmpty())
 }
 
 /**
