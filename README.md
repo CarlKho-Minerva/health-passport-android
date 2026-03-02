@@ -4,7 +4,7 @@
 
 **Health Passport** is a privacy-first Android application that turns your phone into a structured medical records system. Query your prescriptions conversationally, browse your health timeline, and manage medical documents — all with on-device AI inference using NexaSDK on Qualcomm Hexagon NPU.
 
-[![Health Passport demo](https://img.youtube.com/vi/2JNhoXNvsCo/maxresdefault.jpg)](https://www.youtube.com/watch?v=2JNhoXNvsCo)
+[![Health Passport — GitHub Pages](docs/preview.png)](https://carlkho-minerva.github.io/health-passport-android/)
 
 ## 🎯 The Problem
 
@@ -141,9 +141,9 @@ Download `health-passport-v9-final.apk` (117MB) from releases.
 adb install health-passport-v9-final.apk
 ```
 
-## 🎥 Demo Video
+## 🎥 Demo
 
-[YouTube Demo Link - Coming Soon]
+[carlkho-minerva.github.io/health-passport-android](https://carlkho-minerva.github.io/health-passport-android/)
 
 **Script:** See [HEALTH_PASSPORT_DEMO_SCRIPT.md](HEALTH_PASSPORT_DEMO_SCRIPT.md)
 
