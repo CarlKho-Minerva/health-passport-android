@@ -155,8 +155,8 @@ class MainActivity : FragmentActivity() {
     private lateinit var btnSelectModelFile: Button
     private lateinit var btnBrowseFiles: Button
     private lateinit var etInput: EditText
-    private lateinit var btnSend: Button
-    private lateinit var btnClearHistory: Button
+    private lateinit var btnAskDoctor: Button
+    private lateinit var btnSaveVault: Button
     private lateinit var btnAddImage: Button
     private lateinit var btnAudioRecord: Button
 
@@ -321,8 +321,8 @@ class MainActivity : FragmentActivity() {
         btnAudioCancel = findViewById(R.id.btn_audio_cancel)
         btnAudioDone = findViewById(R.id.btn_audio_done)
 
-        btnSend = findViewById(R.id.btn_send)
-        btnClearHistory = findViewById(R.id.btn_clear_history)
+        btnAskDoctor = findViewById(R.id.btn_ask_doctor)
+        btnSaveVault = findViewById(R.id.btn_save_vault)
         scrollImages = findViewById(R.id.scroll_images)
         topScrollContainer = findViewById(R.id.ll_images_container)
         llLoading = findViewById(R.id.ll_loading)
@@ -1114,21 +1114,24 @@ ___
         initNexaSdk()
         //
         val sysPrompt = """\
-You are Health Passport, an on-device medical assistant. You have access to the patient's health records stored locally on this phone, including body system files, medication lists, lab results, and medical timeline.
+You are an experienced, evidence-based physician and personal health strategist built into the Health Passport app. You operate entirely on-device — no data leaves this phone.
 
-When the user asks a health question:
-1. Search all available health records for relevant information
-2. Answer based on the records you have access to
-3. If records contain relevant data, cite specifics (dates, values, medications)
-4. If records don't cover the topic, say "Your health vault doesn't have records about this yet"
+You have direct access to the patient's health records stored locally, including:
+- Body system files (eyes, cardiovascular, limbs, neuro/psych, lab baselines)
+- Active medications and protocols
+- Medical timeline and visit history
+- Scanned documents (OCR extractions)
 
-When the user sends an image of a medical document:
-1. Identify the document type (lab_report, prescription, receipt, xray, other)
-2. Extract key findings in a structured format
-3. List any medications with dosage and frequency
-4. Identify action items (follow-up appointments, refills, tests)
+Core directives:
+1. ALWAYS reference the patient's health records when answering. Cite specific data (dates, values, meds) from the records.
+2. Be precise and evidence-based. Specify dosage, frequency, and mechanism when discussing medications.
+3. If records contain relevant data, analyze and synthesize across systems (e.g., medication interactions, timeline patterns).
+4. If records don't cover the topic, say "Your health vault doesn't have records about this yet."
+5. When analyzing scanned documents: identify document type, key findings, medications, and action items.
+6. Keep responses concise. Use bold for emphasis. No unnecessary fluff.
+7. The patient travels internationally — factor in medication availability and regional healthcare context when relevant.
 
-Keep responses concise and conversational. Use minimal markdown (bold for emphasis, no headers in chat). All processing happens on-device — no data leaves this phone.
+You are a clinical tool, not a replacement for in-person care. Flag when something needs urgent professional attention.
 """
         // Use the full detailed prompt for both VLM and LLM
         addSystemPrompt(sysPrompt)
@@ -2289,8 +2292,16 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
             startRecord()
         }
 
-        btnClearHistory.setOnClickListener {
+        // Save to Vault button — saves last assistant response as health record
+        btnSaveVault.setOnClickListener {
+            saveLastResponseToVault()
+        }
+
+        // Long-press on Save to Vault → clear chat history
+        btnSaveVault.setOnLongClickListener {
             clearHistory()
+            Toast.makeText(this, "Chat cleared", Toast.LENGTH_SHORT).show()
+            true
         }
 
         btnSelectModelFile.setOnClickListener {
@@ -2301,10 +2312,7 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
             browseHealthFiles()
         }
 
-        // Quick-action buttons (always visible)
-        findViewById<Button>(R.id.btn_scan_quick).setOnClickListener {
-            showPopupMenu(it)
-        }
+        // Quick-action buttons
         findViewById<Button>(R.id.btn_vault_quick).setOnClickListener {
             browseHealthFiles()
         }
@@ -2578,7 +2586,7 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
          * - Audio + ASR loaded → transcribe → if LLM also loaded, auto-analyze
          * - Multiple models loaded → pick the best pipeline automatically
          */
-        btnSend.setOnClickListener {
+        btnAskDoctor.setOnClickListener {
             // No model loaded at all → fallback modes
             if (!hasLoadedModel()) {
                 if (savedImageFiles.isNotEmpty()) {
@@ -2667,6 +2675,12 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
                                             GenerationConfigSample().toGenerationConfig(null)
                                         ).collect { handleResult(asrSb, it) }
                                     }
+                            } else if (transcript.isNotBlank()) {
+                                // ASR only, no LLM — offer next actions
+                                addFollowUpChips(
+                                    primaryLabel = "🩺 Ask Doctor about this",
+                                    secondaryLabel = "💾 Save to Vault"
+                                )
                             }
                         }.onFailure { error ->
                             runOnUiThread {
@@ -2720,6 +2734,12 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
                                             reloadRecycleView()
                                         }
                                     }
+                            } else if (fullText.isNotBlank()) {
+                                // OCR only, no LLM — show chips to offer analysis
+                                addFollowUpChips(
+                                    primaryLabel = "🩺 Ask Doctor about this",
+                                    secondaryLabel = "✅ Already saved"
+                                )
                             }
                         }.onFailure { error ->
                             runOnUiThread {
@@ -2754,14 +2774,28 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
                         return@launch
                     }
 
-                    // No image-capable model loaded → guidance
-                    clearImages()
-                    runOnUiThread {
-                        streamResponseToChat(
-                            "**No image model loaded.**\n\n" +
-                            "Load **PaddleOCR** (recommended for documents) or **OmniNeural VLM** (for photos/X-rays).\n\n" +
-                            "Tap **Models** to download and load."
-                        )
+                    // No image-capable model loaded → try auto-loading VLM
+                    val vlmModel = modelList.firstOrNull { it.id == "OmniNeural-4B" }
+                    if (vlmModel != null && isModelDownloaded(vlmModel) == null) {
+                        clearImages()
+                        runOnUiThread {
+                            streamResponseToChat(
+                                "**Loading Vision model (OmniNeural-4B)...**\n\n" +
+                                "Please re-attach your image after loading completes."
+                            )
+                            selectModelId = vlmModel.id
+                            val pos = modelList.indexOfFirst { it.id == selectModelId }
+                            if (pos >= 0) spModelList.setSelection(pos)
+                            btnLoadModel.performClick()
+                        }
+                    } else {
+                        clearImages()
+                        runOnUiThread {
+                            streamResponseToChat(
+                                "**No image model available.**\n\n" +
+                                "Download **PaddleOCR** (documents) or **OmniNeural VLM** (photos/X-rays) from the model picker."
+                            )
+                        }
                     }
                     return@launch
                 }
@@ -3061,6 +3095,9 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
                         )
                     )
                     reloadRecycleView()
+
+                    // Add contextual follow-up chips after LLM response
+                    addFollowUpChips()
                 }
                 Log.d(TAG, "Completed: ${streamResult.profile}")
             }
@@ -3532,6 +3569,58 @@ Keep responses concise and conversational. Use minimal markdown (bold for emphas
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /**
+     * Save the last assistant response in chat to the health vault.
+     * Used by "Save to Vault" button and follow-up action chips.
+     */
+    private fun saveLastResponseToVault() {
+        // Find last assistant message
+        val lastAssistant = messages.lastOrNull { it.type == MessageType.ASSISTANT }
+        if (lastAssistant != null && lastAssistant.content.isNotBlank()) {
+            saveHealthRecord(lastAssistant.content)
+        } else {
+            // If no assistant message, check for user input to save
+            val inputText = etInput.text.trim().toString()
+            if (inputText.isNotEmpty()) {
+                saveHealthRecord("## Manual Note\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$inputText")
+                etInput.setText("")
+            } else {
+                Toast.makeText(this, "Nothing to save — chat or scan first", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Add follow-up action chips after an LLM/OCR response.
+     * Shows contextual buttons like "Save to Vault" / "Ask more" / "Ask Doctor".
+     */
+    private fun addFollowUpChips(
+        primaryLabel: String = "💬 Ask more",
+        secondaryLabel: String = "💾 Save to Vault",
+        primaryAction: (() -> Unit)? = null,
+        secondaryAction: (() -> Unit)? = null
+    ) {
+        runOnUiThread {
+            // Remove any existing chip messages first
+            messages.removeAll { it.type == MessageType.ACTION_CHIPS }
+            messages.add(Message(
+                content = "",
+                type = MessageType.ACTION_CHIPS,
+                chipPrimaryLabel = primaryLabel,
+                chipSecondaryLabel = secondaryLabel,
+                chipPrimaryAction = primaryAction ?: {
+                    etInput.requestFocus()
+                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    @Suppress("UNUSED_EXPRESSION")
+                    imm.showSoftInput(etInput, InputMethodManager.SHOW_IMPLICIT)
+                    Unit
+                },
+                chipSecondaryAction = secondaryAction ?: { saveLastResponseToVault() }
+            ))
+            reloadRecycleView()
+        }
+    }
 
     private fun saveHealthRecord(content: String) {
         try {
