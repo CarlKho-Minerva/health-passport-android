@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — Health Passport</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            color: #1a1a1a;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+            background: #fafafa;
+        }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #0d47a1; }
+        h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; color: #1565c0; }
+        p, li { margin-bottom: 0.8rem; }
+        ul { padding-left: 1.5rem; }
+        .date { color: #666; font-size: 0.9rem; margin-bottom: 2rem; }
+        a { color: #1565c0; }
+        .highlight { background: #e3f2fd; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy</h1>
+    <p class="date">Last updated: March 2, 2026</p>
+
+    <div class="highlight">
+        <strong>TL;DR:</strong> Health Passport processes everything on your device. We do not collect, transmit, or store any of your data on external servers. Your health records never leave your phone.
+    </div>
+
+    <h2>1. Overview</h2>
+    <p>Health Passport ("the App") is an on-device AI application that scans, categorizes, and stores medical documents. This privacy policy explains how the App handles your data.</p>
+    <p>The App is developed by Carl Kho ("we", "us", "our") and is open source at <a href="https://github.com/CarlKho-Minerva/health-passport-android">github.com/CarlKho-Minerva/health-passport-android</a>.</p>
+
+    <h2>2. Data Collection</h2>
+    <p><strong>We do not collect any personal data.</strong> Specifically:</p>
+    <ul>
+        <li>No user accounts or registration required</li>
+        <li>No analytics or tracking</li>
+        <li>No crash reporting sent to external servers</li>
+        <li>No advertising or ad-related data collection</li>
+        <li>No location data collected</li>
+        <li>No cookies or web tracking</li>
+    </ul>
+
+    <h2>3. On-Device Processing</h2>
+    <p>All AI processing in Health Passport happens entirely on your device:</p>
+    <ul>
+        <li><strong>Document scanning:</strong> Images are processed by on-device AI models (e.g., OmniNeural-4B) running on your device's Qualcomm NPU. No images are sent to any server.</li>
+        <li><strong>Health vault:</strong> Your medical records are stored in local files on your device's internal storage. They are never uploaded or synchronized to any cloud service.</li>
+        <li><strong>Chat/RAG:</strong> Questions about your health data are answered by on-device language models. No queries or responses leave your device.</li>
+        <li><strong>Speech transcription:</strong> Audio is transcribed on-device using the Parakeet ASR model. No audio is transmitted externally.</li>
+    </ul>
+
+    <h2>4. Data Storage</h2>
+    <p>The App stores the following data locally on your device:</p>
+    <ul>
+        <li><strong>Health vault files:</strong> Markdown files containing your medical records, organized by body system and timeline. Stored in the app's internal storage directory.</li>
+        <li><strong>AI models:</strong> Downloaded model files (1-3 GB) stored in the app's internal storage. These are open-source AI models from <a href="https://huggingface.co/NexaAI">HuggingFace/NexaAI</a>.</li>
+        <li><strong>Scanned images:</strong> Photos taken for document scanning are stored temporarily for processing.</li>
+        <li><strong>App preferences:</strong> Minimal settings (e.g., first-launch flag) stored in Android SharedPreferences.</li>
+    </ul>
+    <p>All stored data is accessible only to the App and is deleted when you uninstall the App.</p>
+
+    <h2>5. Network Usage</h2>
+    <p>The App connects to the internet only to:</p>
+    <ul>
+        <li><strong>Download AI models:</strong> When you choose to download a model, the App fetches model files from HuggingFace (huggingface.co). No personal data is sent during this process — only standard HTTP requests for the model files.</li>
+    </ul>
+    <p>No other network connections are made. The App functions fully offline after models are downloaded.</p>
+
+    <h2>6. Camera & Microphone</h2>
+    <p>The App requests camera and microphone permissions:</p>
+    <ul>
+        <li><strong>Camera:</strong> Used to photograph medical documents for on-device AI scanning. Photos are processed locally and never transmitted.</li>
+        <li><strong>Microphone:</strong> Used for clinic visit transcription via on-device speech recognition. Audio is processed locally and never transmitted.</li>
+    </ul>
+    <p>You can deny these permissions and still use the App's chat and health vault features.</p>
+
+    <h2>7. Storage Permission</h2>
+    <p>The App may request storage permission to:</p>
+    <ul>
+        <li>Detect manually downloaded model files (e.g., GGUF models in the Downloads folder)</li>
+        <li>Export health records if you choose</li>
+    </ul>
+
+    <h2>8. Third-Party Services</h2>
+    <p>The App does not integrate any third-party analytics, advertising, or data collection services. The only third-party interaction is downloading AI model files from HuggingFace, which is subject to <a href="https://huggingface.co/privacy">HuggingFace's privacy policy</a>.</p>
+
+    <h2>9. Children's Privacy</h2>
+    <p>The App is not directed at children under 13. We do not knowingly collect any data from children.</p>
+
+    <h2>10. Data Deletion</h2>
+    <p>Since all data is stored locally on your device:</p>
+    <ul>
+        <li>You can delete individual health records at any time using the in-app file editor</li>
+        <li>You can delete all data by uninstalling the App</li>
+        <li>You can clear the App's data via Android Settings → Apps → Health Passport → Clear Data</li>
+    </ul>
+
+    <h2>11. Changes to This Policy</h2>
+    <p>We may update this privacy policy from time to time. Changes will be posted on this page with an updated "Last updated" date.</p>
+
+    <h2>12. Contact</h2>
+    <p>If you have questions about this privacy policy:</p>
+    <ul>
+        <li>Email: <a href="mailto:carlkho.cvk@gmail.com">carlkho.cvk@gmail.com</a></li>
+        <li>GitHub: <a href="https://github.com/CarlKho-Minerva/health-passport-android/issues">Report an issue</a></li>
+    </ul>
+
+    <footer>
+        <p>Health Passport is an open-source project built for the Qualcomm × Nexa AI On-Device Builder Bounty Program.</p>
+        <p>&copy; 2026 Carl Kho. All rights reserved.</p>
+    </footer>
+</body>
+</html>

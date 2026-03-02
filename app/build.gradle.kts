@@ -25,12 +25,10 @@ android {
 
     signingConfigs {
         create("release") {
-            // Note: For production builds, use environment variables or local.properties
-            // Example: storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            storeFile = file("test")
-            storePassword = project.findProperty("KEYSTORE_PASSWORD")?.toString() ?: "123456"
-            keyAlias = "test"
-            keyPassword = project.findProperty("KEY_PASSWORD")?.toString() ?: "123456"
+            storeFile = file("${rootProject.projectDir}/healthpassport-release.jks")
+            storePassword = project.findProperty("KEYSTORE_PASSWORD")?.toString() ?: ""
+            keyAlias = "healthpassport"
+            keyPassword = project.findProperty("KEY_PASSWORD")?.toString() ?: ""
         }
     }
 
@@ -93,8 +91,8 @@ print("bridgePathExist: $bridgePathExist\n")
 dependencies {
 
     // ===== NEXA CLOUD SDK =====
-    // Using cloud SDK instead of local bridge - latest version
-    implementation("ai.nexa:core:+")
+    // Pinned to 0.0.24 (latest stable per docs.nexa.ai/en/nexa-sdk-android/quickstart)
+    implementation("ai.nexa:core:0.0.24")
     // ===== NEXA CLOUD SDK END =====
     implementation(project(":transform"))
     implementation(":okdownload-core@aar")

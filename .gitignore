@@ -37,3 +37,4 @@ app/libs/app-release.aar
 app/libs/app-debug.aar
 app/release/
 repo/*.gguf
+gradle.properties

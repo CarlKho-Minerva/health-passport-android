@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Passport — AI-Powered Medical Records</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            color: #1a1a1a;
+            background: #fafafa;
+        }
+        .hero {
+            background: linear-gradient(135deg, #0d47a1, #1565c0, #42a5f5);
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+        .hero h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+        .hero p { font-size: 1.2rem; opacity: 0.9; max-width: 600px; margin: 0 auto; }
+        .badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 1rem;
+        }
+        .content { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
+        h2 { font-size: 1.5rem; margin-top: 2.5rem; margin-bottom: 1rem; color: #0d47a1; }
+        .features { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0; }
+        .feature {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .feature h3 { margin-bottom: 0.5rem; font-size: 1.1rem; }
+        .feature .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .cta {
+            text-align: center;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        .cta a {
+            display: inline-block;
+            background: #0d47a1;
+            color: white;
+            padding: 0.8rem 2rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 1.1rem;
+            margin: 0.5rem;
+        }
+        .cta a:hover { background: #1565c0; }
+        .cta a.secondary { background: #546e7a; }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+            font-size: 0.85rem;
+            border-top: 1px solid #ddd;
+        }
+        footer a { color: #1565c0; }
+        @media (max-width: 600px) {
+            .features { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 1.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>Health Passport</h1>
+        <p>AI-powered medical document scanner & health records vault — runs 100% on your device</p>
+        <span class="badge">Qualcomm × Nexa AI Builder Bounty — Phase 1 Winner</span>
+    </div>
+
+    <div class="content">
+        <h2>Features</h2>
+        <div class="features">
+            <div class="feature">
+                <div class="icon">🔍</div>
+                <h3>Scan Documents</h3>
+                <p>Point your camera at prescriptions, lab results, or insurance cards. AI extracts structured data instantly.</p>
+            </div>
+            <div class="feature">
+                <div class="icon">📋</div>
+                <h3>Health Vault</h3>
+                <p>Records organized by body system, timeline, medications, and protocols. Browse and edit anytime.</p>
+            </div>
+            <div class="feature">
+                <div class="icon">💬</div>
+                <h3>Ask AI Questions</h3>
+                <p>Chat with your health vault. "What are my medications?" — answered from YOUR data, on-device.</p>
+            </div>
+            <div class="feature">
+                <div class="icon">🔒</div>
+                <h3>100% Private</h3>
+                <p>All AI processing on Snapdragon NPU. Your data never leaves your phone. No cloud. No accounts.</p>
+            </div>
+            <div class="feature">
+                <div class="icon">🎙️</div>
+                <h3>Clinic Transcription</h3>
+                <p>Record and transcribe clinic visits with on-device speech recognition.</p>
+            </div>
+            <div class="feature">
+                <div class="icon">⚡</div>
+                <h3>NPU Accelerated</h3>
+                <p>Powered by Qualcomm Snapdragon NPU + Nexa AI SDK for fast on-device inference.</p>
+            </div>
+        </div>
+
+        <div class="cta">
+            <a href="https://github.com/CarlKho-Minerva/health-passport-android">GitHub</a>
+            <a href="https://www.youtube.com/watch?v=2JNhoXNvsCo" class="secondary">Watch Demo</a>
+        </div>
+
+        <h2>Tech Stack</h2>
+        <ul>
+            <li><strong>Nexa AI SDK</strong> (v0.0.24) — On-device model inference</li>
+            <li><strong>OmniNeural-4B</strong> — Vision Language Model for document scanning</li>
+            <li><strong>Qwen3-4B / Llama-3.2-3B</strong> — LLM for health Q&A</li>
+            <li><strong>PaddleOCR</strong> — OCR fallback for text extraction</li>
+            <li><strong>Parakeet-TDT</strong> — On-device speech-to-text</li>
+            <li><strong>EmbedGemma</strong> — Embeddings for semantic search</li>
+            <li><strong>Kotlin</strong> + Android SDK 36</li>
+        </ul>
+
+        <h2>Requirements</h2>
+        <ul>
+            <li>Android 8.1+ (API 27)</li>
+            <li>Snapdragon 8 Gen 2 or newer recommended for NPU features</li>
+            <li>4GB+ RAM recommended</li>
+            <li>~2GB storage for AI models (downloaded on first use)</li>
+        </ul>
+    </div>
+
+    <footer>
+        <p>Built by <a href="https://linkedin.com/in/carlkho/">Carl Kho</a> for the Qualcomm × Nexa AI On-Device Builder Bounty Program</p>
+        <p><a href="privacy-policy.html">Privacy Policy</a> · <a href="support.html">Support</a> · <a href="https://medium.com/@carlkho-cvk/health-passport-270f183db3c6">Blog Post</a></p>
+        <p>&copy; 2026 Carl Kho</p>
+    </footer>
+</body>
+</html>

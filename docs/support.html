@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Support — Health Passport</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            color: #1a1a1a;
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+            background: #fafafa;
+        }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; color: #0d47a1; }
+        h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; color: #1565c0; }
+        p, li { margin-bottom: 0.8rem; }
+        ul { padding-left: 1.5rem; }
+        a { color: #1565c0; }
+        .card { background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin: 1rem 0; }
+        .card h3 { margin-bottom: 0.5rem; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <h1>Health Passport — Support</h1>
+    <p>Need help with Health Passport? Here's how to get support.</p>
+
+    <div class="card">
+        <h3>Report a Bug or Request a Feature</h3>
+        <p>The best way to report issues or request features is through GitHub Issues:</p>
+        <p><a href="https://github.com/CarlKho-Minerva/health-passport-android/issues">github.com/CarlKho-Minerva/health-passport-android/issues</a></p>
+    </div>
+
+    <div class="card">
+        <h3>Email Support</h3>
+        <p>For general questions or concerns:</p>
+        <p><a href="mailto:carlkho.cvk@gmail.com">carlkho.cvk@gmail.com</a></p>
+    </div>
+
+    <h2>Frequently Asked Questions</h2>
+
+    <h3>What devices are supported?</h3>
+    <p>Health Passport requires Android 8.1 or later. For full AI capabilities (NPU acceleration), a Snapdragon 8 Gen 2 or newer processor is recommended. The app works on all Android devices in mock/demo mode.</p>
+
+    <h3>How much storage do the AI models need?</h3>
+    <p>AI models range from 50MB (PaddleOCR) to ~2.5GB (OmniNeural-4B VLM). You choose which models to download. The app works without models in demo mode.</p>
+
+    <h3>Is my data safe?</h3>
+    <p>Yes. All data processing happens entirely on your device. No data is sent to any server. See our <a href="privacy-policy.html">Privacy Policy</a> for details.</p>
+
+    <h3>The app crashes when loading models on my device</h3>
+    <p>If you have a non-Snapdragon device (Google Pixel, Samsung Exynos, MediaTek), NPU models will not work. Use the GGUF CPU fallback models instead, or try mock/demo mode.</p>
+
+    <h3>Can I export my health records?</h3>
+    <p>Your health records are stored as standard Markdown files in the app's internal storage. You can browse and edit them in the app. Export functionality is planned for a future update.</p>
+
+    <footer>
+        <p>Health Passport v1.0 — Built for the Qualcomm × Nexa AI On-Device Builder Bounty Program.</p>
+        <p>&copy; 2026 Carl Kho. <a href="privacy-policy.html">Privacy Policy</a></p>
+    </footer>
+</body>
+</html>

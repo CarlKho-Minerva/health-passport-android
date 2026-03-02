@@ -104,6 +104,7 @@ import com.nexa.sdk.bean.CVCapability
 import com.nexa.sdk.bean.CVCreateInput
 import com.nexa.sdk.bean.CVModelConfig
 import com.nexa.sdk.bean.ChatMessage
+import com.nexa.sdk.bean.EmbedResult
 import com.nexa.sdk.bean.EmbedderCreateInput
 import com.nexa.sdk.bean.EmbeddingConfig
 import com.nexa.sdk.bean.LlmCreateInput
@@ -423,6 +424,9 @@ class MainActivity : FragmentActivity() {
             val assetModels = assets.list("nexa_models") ?: emptyArray()
             if (assetModels.isEmpty()) {
                 Log.i(TAG, "No bundled models in assets/nexa_models/")
+                runOnUiThread {
+                    Toast.makeText(this, "No bundled models found in assets/nexa_models/", Toast.LENGTH_SHORT).show()
+                }
                 return
             }
 
@@ -500,6 +504,91 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * RAG: Load relevant health vault files as context for the LLM.
+     * Uses keyword matching to find relevant files, reads their content,
+     * and returns a context string to prepend to the user's query.
+     */
+    private fun loadVaultContext(query: String): String {
+        if (!::healthVaultDir.isInitialized || !healthVaultDir.exists()) return ""
+
+        val q = query.lowercase()
+        val relevantFiles = mutableListOf<File>()
+
+        // Keyword → file mapping for targeted retrieval
+        val keywordMap = mapOf(
+            listOf("eye", "vision", "glasses", "optical", "myop", "astigmat", "sight", "prescription") to "01_Body_Systems/01_Head_Eyes_ENT.md",
+            listOf("heart", "cardio", "blood pressure", "bp", "pulse", "cholesterol") to "01_Body_Systems/02_Cardiovascular_Heart.md",
+            listOf("arm", "leg", "bone", "joint", "ortho", "fracture", "limb") to "01_Body_Systems/03_Limbs_Ortho.md",
+            listOf("neuro", "brain", "psych", "mental", "anxiety", "depression", "headache") to "01_Body_Systems/06_Neuro_Psych.md",
+            listOf("lab", "blood test", "cbc", "lipid", "glucose", "baseline") to "01_Body_Systems/00_Lab_Baselines.md",
+            listOf("med", "drug", "pill", "taking", "medication", "dose") to "03_Protocols/Active_Medications.md",
+            listOf("timeline", "history", "when", "visit", "appointment", "date") to "02_Timeline/Medical_Timeline.md"
+        )
+
+        // Find matching files
+        for ((keywords, filePath) in keywordMap) {
+            if (keywords.any { q.contains(it) }) {
+                val file = File(healthVaultDir, filePath)
+                if (file.exists()) relevantFiles.add(file)
+            }
+        }
+
+        // If no specific match, include summary files
+        if (relevantFiles.isEmpty()) {
+            val defaultFiles = listOf(
+                "02_Timeline/Medical_Timeline.md",
+                "03_Protocols/Active_Medications.md",
+                "01_Body_Systems/01_Head_Eyes_ENT.md"
+            )
+            for (path in defaultFiles) {
+                val file = File(healthVaultDir, path)
+                if (file.exists()) relevantFiles.add(file)
+            }
+        }
+
+        // Read file contents, limit to ~3000 chars total to stay within context window
+        val contextBuilder = StringBuilder()
+        contextBuilder.append("--- HEALTH VAULT CONTEXT ---\n")
+        var totalChars = 0
+        val maxChars = 3000
+
+        for (file in relevantFiles) {
+            if (totalChars >= maxChars) break
+            try {
+                val content = file.readText()
+                val remaining = maxChars - totalChars
+                val truncated = if (content.length > remaining) content.substring(0, remaining) + "\n[...truncated]" else content
+                contextBuilder.append("\n## ${file.nameWithoutExtension}\n")
+                contextBuilder.append(truncated)
+                contextBuilder.append("\n")
+                totalChars += truncated.length
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not read vault file: ${file.name}: ${e.message}")
+            }
+        }
+        contextBuilder.append("--- END HEALTH VAULT CONTEXT ---\n")
+
+        Log.d(TAG, "RAG: loaded ${relevantFiles.size} vault files, ${totalChars} chars")
+        return contextBuilder.toString()
+    }
+
+    /**
+     * Build a RAG-augmented prompt: vault context + user question.
+     */
+    private fun buildRagPrompt(userQuery: String): String {
+        val vaultContext = loadVaultContext(userQuery)
+        if (vaultContext.isBlank()) return userQuery
+
+        return """Based on the patient's health records below, answer their question accurately and concisely.
+
+$vaultContext
+
+Patient's question: $userQuery
+
+Answer based ONLY on the health records above. If the records don't contain relevant information, say so."""
     }
 
     /**
@@ -1039,12 +1128,63 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
         return fileName
     }
 
+    /**
+     * Detect if running on a Snapdragon/Qualcomm device.
+     * Non-Snapdragon devices (Pixel Tensor, Exynos, MediaTek) will crash
+     * when loading models with cpu_gpu or npu plugins.
+     */
+    private fun isSnapdragonDevice(): Boolean {
+        val hardware = android.os.Build.HARDWARE.lowercase()
+        val board = android.os.Build.BOARD.lowercase()
+        val soc = try {
+            File("/sys/devices/soc0/machine").readText().trim().lowercase()
+        } catch (e: Exception) { "" }
+        val socId = try {
+            File("/sys/devices/soc0/soc_id").readText().trim()
+        } catch (e: Exception) { "" }
+
+        val isQcom = hardware.contains("qcom") ||
+                board.contains("taro") || board.contains("kalama") ||
+                board.contains("pineapple") || board.contains("sun") ||
+                soc.contains("snapdragon") || soc.contains("qrd") ||
+                hardware.contains("snapdragon")
+
+        Log.i(TAG, "Device check: HW=$hardware, BOARD=$board, SOC=$soc, SOC_ID=$socId, isQcom=$isQcom")
+        return isQcom
+    }
+
+    /**
+     * Determine if a model file is a VLM (vision-language model) based on name.
+     * VLMs need VlmWrapper; LLMs need LlmWrapper.
+     */
+    private fun isVisionModel(fileName: String): Boolean {
+        val lower = fileName.lowercase()
+        return lower.contains("vl") ||       // Qwen-VL, Qwen2-VL, Qwen3-VL
+               lower.contains("vision") ||    // Llama-3.2-Vision
+               lower.contains("omni") ||      // OmniNeural
+               lower.contains("mmproj") ||    // mmproj files indicate VLM
+               lower.endsWith(".nexa")        // Nexa NPU format (OmniNeural-4B)
+    }
+
     private fun loadManualModel(modelPath: String, pluginId: String, nGpuLayers: Int) {
         modelScope.launch {
             resetLoadState()
 
             runOnUiThread {
                 tvModelStatus.text = "Loading model..."
+            }
+
+            // Guard: warn if not Snapdragon and trying NPU/cpu_gpu plugins
+            if (!isSnapdragonDevice() && (pluginId == "cpu_gpu" || pluginId == "npu")) {
+                Log.w(TAG, "Non-Snapdragon device detected! Plugin '$pluginId' may crash.")
+                runOnUiThread {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "⚠️ Non-Snapdragon device. NPU/GPU plugins may fail. Use QDC or mock mode.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                // Continue anyway — let user try, but they've been warned
             }
 
             val modelFile = File(modelPath)
@@ -1068,9 +1208,15 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             Log.d(TAG, "  - Size: ${modelFile.length()} bytes")
             Log.d(TAG, "  - Plugin: $pluginId")
             Log.d(TAG, "  - GPU Layers: $nGpuLayers")
+            Log.d(TAG, "  - Is VLM: ${isVisionModel(modelFile.name)}")
 
-            // For GGUF files, use empty model_name and minimal config
-            // Note: NPU paths must be set even for CPU/GPU plugins
+            // Check if this is a vision model → load as VLM
+            if (isVisionModel(modelFile.name)) {
+                loadManualVlmModel(modelFile, pluginId, nGpuLayers)
+                return@launch
+            }
+
+            // Otherwise load as LLM (text-only)
             val conf = ModelConfig(
                 nCtx = 2048,
                 nGpuLayers = nGpuLayers,
@@ -1090,12 +1236,98 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             ).build().onSuccess { wrapper ->
                 isLoadLlmModel = true
                 llmWrapper = wrapper
-                onLoadModelSuccess("Manual model loaded: ${modelFile.name}")
-                Log.d(TAG, "Manual model loaded successfully")
+                onLoadModelSuccess("LLM loaded: ${modelFile.name}")
+                Log.d(TAG, "Manual LLM model loaded successfully")
             }.onFailure { error ->
-                Log.e(TAG, "Manual model load failed: ${error.message}")
+                Log.e(TAG, "Manual LLM load failed: ${error.message}")
                 onLoadModelFailed(error.message.toString())
             }
+        }
+    }
+
+    /**
+     * Load a manual VLM model file. Handles both:
+     * - GGUF VLMs (need mmproj file in same directory, plugin_id = "cpu_gpu")
+     * - Nexa NPU VLMs (plugin_id = "npu", .nexa format)
+     */
+    private fun loadManualVlmModel(modelFile: File, pluginId: String, nGpuLayers: Int) {
+        modelScope.launch {
+            // For GGUF VLMs, look for mmproj file in same directory
+            var mmprojPath: String? = null
+            if (modelFile.name.endsWith(".gguf", ignoreCase = true)) {
+                val parentDir = modelFile.parentFile
+                val mmprojFile = parentDir?.listFiles()?.firstOrNull {
+                    it.name.contains("mmproj", ignoreCase = true) && it.name.endsWith(".gguf", ignoreCase = true)
+                }
+                mmprojPath = mmprojFile?.absolutePath
+                Log.d(TAG, "VLM mmproj file: ${mmprojPath ?: "NOT FOUND (will attempt without)"}")
+            }
+
+            val isNpu = pluginId == "npu"
+            val config = if (isNpu) {
+                ModelConfig(
+                    nCtx = 2048,
+                    nThreads = 8,
+                    enable_thinking = false,
+                    npu_lib_folder_path = applicationInfo.nativeLibraryDir,
+                    npu_model_folder_path = modelFile.parentFile?.absolutePath ?: filesDir.absolutePath
+                )
+            } else {
+                ModelConfig(
+                    nCtx = 2048,
+                    nThreads = 4,
+                    nBatch = 1,
+                    nUBatch = 1,
+                    nGpuLayers = nGpuLayers,
+                    enable_thinking = false,
+                    npu_lib_folder_path = applicationInfo.nativeLibraryDir,
+                    npu_model_folder_path = filesDir.absolutePath
+                )
+            }
+
+            val vlmCreateInput = VlmCreateInput(
+                model_name = if (isNpu) modelFile.nameWithoutExtension else "",
+                model_path = modelFile.absolutePath,
+                mmproj_path = mmprojPath,
+                config = config,
+                plugin_id = pluginId
+            )
+
+            VlmWrapper.builder()
+                .vlmCreateInput(vlmCreateInput)
+                .build().onSuccess {
+                    isLoadVlmModel = true
+                    vlmWrapper = it
+                    onLoadModelSuccess("VLM loaded: ${modelFile.name}")
+                    Log.d(TAG, "Manual VLM model loaded successfully")
+                }.onFailure { error ->
+                    Log.e(TAG, "Manual VLM load failed: ${error.message}")
+                    // If VLM fails, try falling back to LLM
+                    Log.i(TAG, "Attempting LLM fallback...")
+                    val llmConf = ModelConfig(
+                        nCtx = 2048,
+                        nGpuLayers = nGpuLayers,
+                        enable_thinking = false,
+                        npu_lib_folder_path = applicationInfo.nativeLibraryDir,
+                        npu_model_folder_path = filesDir.absolutePath
+                    )
+                    LlmWrapper.builder().llmCreateInput(
+                        LlmCreateInput(
+                            model_name = "",
+                            model_path = modelFile.absolutePath,
+                            tokenizer_path = null,
+                            config = llmConf,
+                            plugin_id = pluginId
+                        )
+                    ).build().onSuccess { wrapper ->
+                        isLoadLlmModel = true
+                        llmWrapper = wrapper
+                        onLoadModelSuccess("Loaded as LLM (VLM failed): ${modelFile.name}")
+                    }.onFailure { llmError ->
+                        Log.e(TAG, "Both VLM and LLM load failed: ${llmError.message}")
+                        onLoadModelFailed("VLM: ${error.message}\nLLM fallback: ${llmError.message}")
+                    }
+                }
         }
     }
 
@@ -1956,7 +2188,7 @@ space ::= | " " | "\n" | "\r" | "\t"
                         }
                     } else {
 //                        val audioFilePath = audioFile!!.absolutePath
-                        val audioFilePath = "/sdcard/Download/assets/OSR_us_000_0010_16k.wav"
+                        val audioFilePath = audioFile!!.absolutePath
                         asrWrapper.transcribe(
                             AsrTranscribeInput(
                                 audioFilePath,  // Use hardcoded path instead of inputString
@@ -1986,44 +2218,43 @@ space ::= | " " | "\n" | "\r" | "\t"
                         }
                     }
                 }
-//                else if (isLoadEmbedderModel) {
-//                    // ADD: Handle embedder inference
-//                    // Input format: single text or multiple texts separated by "|"
-//                    val texts = inputString.split("|").map { it.trim() }.toTypedArray()
-//                    embedderWrapper!!.embed(texts, EmbeddingConfig()).onSuccess { embeddings ->
-//                        runOnUiThread {
-//                            val result = StringBuilder()
-//                            val embeddingDim = embeddings.size / texts.size
-//
-//                            texts.forEachIndexed { idx, text ->
-//                                val start = idx * embeddingDim
-//                                val end = start + embeddingDim
-//                                val embedding = embeddings.slice(start until end)
-//
-//                                // Calculate mean and variance
-//                                val mean = embedding.average()
-//                                val variance = embedding.map { (it - mean) * (it - mean) }.average()
-//
-//                                result.append("Text ${idx + 1}: \"$text\"\n")
-//                                result.append("Embedding dimension: $embeddingDim\n")
-//                                result.append("Mean: ${"%.4f".format(mean)}\n")
-//                                result.append("Variance: ${"%.4f".format(variance)}\n")
-//                                result.append("First 5 values: [")
-//                                result.append(
-//                                    embedding.take(5).joinToString(", ") { "%.4f".format(it) })
-//                                result.append("...]\n\n")
-//                            }
-//
-//                            messages.add(Message(result.toString(), MessageType.ASSISTANT))
-//                            reloadRecycleView()
-//                        }
-//                    }.onFailure { error ->
-//                        runOnUiThread {
-//                            messages.add(Message("Error: ${error.message}", MessageType.PROFILE))
-//                            reloadRecycleView()
-//                        }
-//                    }
-//                }
+                else if (isLoadEmbedderModel) {
+                    // Embedder inference — show embedding stats for input text
+                    val texts = inputString.split("|").map { it.trim() }.toTypedArray()
+                    embedderWrapper!!.embed(texts, EmbeddingConfig()).onSuccess { embedResult ->
+                        runOnUiThread {
+                            val result = StringBuilder()
+                            val allEmbeddings = embedResult.embeddings
+                            val embeddingDim = allEmbeddings.size / texts.size
+
+                            texts.forEachIndexed { idx, text ->
+                                val start = idx * embeddingDim
+                                val end = start + embeddingDim
+                                val embedding = allEmbeddings.slice(start until end)
+
+                                val mean = embedding.average()
+                                val variance = embedding.map { (it - mean) * (it - mean) }.average()
+
+                                result.append("Text ${idx + 1}: \"$text\"\n")
+                                result.append("Embedding dimension: $embeddingDim\n")
+                                result.append("Mean: ${"%.4f".format(mean)}\n")
+                                result.append("Variance: ${"%.4f".format(variance)}\n")
+                                result.append("First 5 values: [")
+                                result.append(
+                                    embedding.take(5).joinToString(", ") { "%.4f".format(it) })
+                                result.append("...]\n\n")
+                            }
+
+                            messages.add(Message(result.toString(), MessageType.ASSISTANT))
+                            reloadRecycleView()
+                        }
+                    }.onFailure { error ->
+                        runOnUiThread {
+                            messages.add(Message("Error: ${error.message}", MessageType.PROFILE))
+                            reloadRecycleView()
+                        }
+                    }
+                }
                 else if (isLoadRerankerModel) {
                     // Reranker input format: "query\ndoc1\ndoc2\ndoc3..."
                     // First line is query, remaining lines are documents
@@ -2097,7 +2328,10 @@ space ::= | " " | "\n" | "\r" | "\t"
                             }
                         }
                 } else {
-                    chatList.add(ChatMessage(role = "user", inputString))
+                    // RAG: Augment user query with relevant health vault context
+                    val ragPrompt = buildRagPrompt(inputString)
+                    Log.d(TAG, "RAG prompt (${ragPrompt.length} chars): ${ragPrompt.take(200)}...")
+                    chatList.add(ChatMessage(role = "user", ragPrompt))
                     // Apply chat template and generate
                     llmWrapper.applyChatTemplate(
                         chatList.toTypedArray(),
@@ -3110,7 +3344,15 @@ space ::= | " " | "\n" | "\r" | "\t"
 
     companion object {
         private const val SP_DOWNLOADED = "sp_downloaded"
-        private const val TAG = "MainActivity"
+        private const val TAG = "HealthPassport"
         private const val REQUEST_CODE_MODEL_FILE = 2000
+
+        // Model types for the model_list.json "type" field
+        const val MODEL_TYPE_LLM = "chat"
+        const val MODEL_TYPE_VLM = "multimodal"
+        const val MODEL_TYPE_OCR = "paddleocr"
+        const val MODEL_TYPE_ASR = "asr"
+        const val MODEL_TYPE_EMBEDDING = "embedder"
+        const val MODEL_TYPE_RERANKER = "reranker"
     }
 }
