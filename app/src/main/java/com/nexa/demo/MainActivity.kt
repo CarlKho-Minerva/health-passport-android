@@ -141,6 +141,7 @@ class MainActivity : FragmentActivity() {
     private var downloadContext: DownloadContext? = null
     private var downloadState = DownloadState.IDLE
     private var downloadingModelData: ModelData? = null
+    private var downloadWakeLock: android.os.PowerManager.WakeLock? = null
     private lateinit var spDownloaded: SharedPreferences
     private lateinit var llDownloading: LinearLayout
     private lateinit var tvDownloadProgress: TextView
@@ -1543,6 +1544,10 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             downloadingModelData = selectModelData
             llDownloading.visibility = View.VISIBLE
             tvDownloadProgress.text = "0%"
+            // Keep screen/CPU alive during download so sleep doesn't interrupt it
+            downloadWakeLock = (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+                .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "HealthPassport:Download")
+                .also { it.acquire(30 * 60 * 1000L /*30min*/) }
             modelScope.launch {
                 val selectModelData = modelList.first { it.id == selectModelId }
                 val unsafeClient = getUnsafeOkHttpClient().build()
@@ -1567,6 +1572,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         runOnUiThread {
                             downloadState = DownloadState.IDLE
                             llDownloading.visibility = View.GONE
+                            downloadWakeLock?.let { if (it.isHeld) it.release() }
+                            downloadWakeLock = null
                             Toaster.show("Failed to fetch file list.")
                         }
                         return@launch
@@ -1652,6 +1659,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                     runOnUiThread {
                         downloadState = DownloadState.IDLE
                         llDownloading.visibility = View.GONE
+                        downloadWakeLock?.let { if (it.isHeld) it.release() }
+                        downloadWakeLock = null
                         Toaster.show("Download failed - could not get file sizes.")
                     }
                     return@launch
@@ -1677,6 +1686,14 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                         if (100 == percent) {
                             llDownloading.visibility = View.GONE
                             spDownloaded.edit().putBoolean(selectModelId, true).commit()
+                            // Write completion marker so getNonExistModelFile knows download is complete
+                            try {
+                                File(selectModelData.modelDir(this@MainActivity), ".complete").writeText("done")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Could not write .complete marker: ${e.message}")
+                            }
+                            downloadWakeLock?.let { if (it.isHeld) it.release() }
+                            downloadWakeLock = null
                             Toaster.show("${downloadingModelData?.displayName} downloaded")
                         } else {
                             tvDownloadProgress.text = "$percent%"
@@ -1720,6 +1737,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                             runOnUiThread {
                                 downloadState = DownloadState.IDLE
                                 llDownloading.visibility = View.GONE
+                                downloadWakeLock?.let { if (it.isHeld) it.release() }
+                                downloadWakeLock = null
                                 Toaster.show("Download failed for some files.")
                             }
                         }
@@ -1811,6 +1830,8 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
                                             runOnUiThread {
                                                 downloadState = DownloadState.IDLE
                                                 llDownloading.visibility = View.GONE
+                                                downloadWakeLock?.let { if (it.isHeld) it.release() }
+                                                downloadWakeLock = null
                                                 Toaster.show("Download failed for ${failedDownloads.size} file(s).")
                                             }
                                         }

@@ -241,12 +241,13 @@ fun ModelData.allModelFilesExist(modelDir: File): Boolean {
 
 fun ModelData.getNonExistModelFile(modelDir: File): String? {
     val staticFiles = this.downloadableFiles(modelDir)
-    // For dynamic-fetch models (baseUrl set, no static files), check directory contents
+    // For dynamic-fetch models (baseUrl set, no static files), require .complete marker
     if (staticFiles.isEmpty() && !baseUrl.isNullOrEmpty()) {
-        return if (modelDir.exists() && (modelDir.listFiles()?.size ?: 0) > 0) {
-            null  // Directory has files -> downloaded
+        val completeMarker = File(modelDir, ".complete")
+        return if (modelDir.exists() && completeMarker.exists()) {
+            null  // Complete download marker found -> fully downloaded
         } else {
-            modelDir.absolutePath  // Empty or missing -> needs download
+            modelDir.absolutePath  // Missing or incomplete (no .complete marker) -> needs download
         }
     }
     staticFiles.forEach {
