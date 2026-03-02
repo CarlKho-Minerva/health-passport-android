@@ -7,6 +7,7 @@ Qualcomm Device Cloud — remote access to real Snapdragon hardware.
 - **Free minutes:** 1000
 - **SSH key:** `/Users/cvk/Downloads/carl/qdc_id_2026-2-15_1941.pem`
 
+
 ---
 
 ## Step 1: Start a QDC Session
@@ -25,7 +26,7 @@ Qualcomm Device Cloud — remote access to real Snapdragon hardware.
 
 The QDC dashboard will give you an SSH command like:
 ```bash
-ssh -i /Users/cvk/Downloads/carl/qdc_id_2026-2-15_1941.pem user@<ip-address>
+ssh -i /Users/cvk/Downloads/CODELocalProjects/health-passport-android/qdc_id_2026-2-15_1941.pem -L 5037:sa484732.sa.svc.cluster.local:5037 -N sshtunnel@ssh.qdc.qualcomm.com
 ```
 
 Run it in your terminal. Once connected, you have `adb` access to the device.
@@ -43,7 +44,7 @@ adb devices
 ### Option A: Via ADB (SSH)
 ```bash
 # From your local machine, use the SSH-forwarded adb
-adb install /path/to/app-debug.apk
+adb install /Users/cvk/Downloads/CODELocalProjects/health-passport-android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Option B: Via Screen Mirroring
@@ -58,16 +59,34 @@ adb shell pm install /sdcard/Download/app-debug.apk
 
 ---
 
+## Step 3b: Reinstall APK with Crash Fix
+
+> **The original APK had a bug:** the model selector spinner is hidden in the UI,
+> so `selectModelId` stayed empty (`""`) and tapping **Download** crashed the app
+> with `NoSuchElementException`. The fix initializes `selectModelId` to OmniNeural-4B
+> on startup. Reinstall before testing.
+
+```bash
+# Uninstall old build first (avoids signature conflicts)
+adb uninstall com.nexa.demo
+
+# Install the fixed APK
+adb install /Users/cvk/Downloads/CODELocalProjects/health-passport-android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
 ## Step 4: Download Models on Device
 
 ### Option A: In-App Download (Recommended)
 1. Open Health Passport app on the QDC device
-2. Tap the model spinner at the top
-3. Select **OmniNeural-4B (VLM 👁️)**
-4. Tap **Download** → wait for download (~2GB, QDC has fast internet)
-5. Once downloaded, tap **Load** → should show dialog with NPU option
-6. Select **NPU** → tap **Sure**
-7. Wait for "VLM loaded" toast
+2. Tap **Download** — there is NO visible model spinner; the app defaults to **OmniNeural-4B** automatically (fixed in latest build)
+3. Wait for download (~2 GB, QDC has fast internet)
+4. Once downloaded, tap **Load** → dialog appears with plugin options
+5. Select **NPU** → tap **Sure**
+6. Wait for "VLM loaded" toast
+
+> Note: the model spinner (`sp_model_list`) exists in code but is hidden in the layout. The UI shows four buttons: Download / Load / Select Model File / Health Vault. Download defaults to OmniNeural-4B.
 
 ### Option B: Pre-push Models via ADB
 ```bash
@@ -82,6 +101,20 @@ adb push ./OmniNeural-4B-mobile /sdcard/Download/nexa_models/OmniNeural-4B-mobil
 adb shell mkdir -p /data/data/com.carlkho.healthpassport/files/models/omni-neural/
 adb push ./OmniNeural-4B-mobile/* /data/data/com.carlkho.healthpassport/files/models/omni-neural/
 ```
+
+### Option C: Push a Test Image for Scanning
+
+You don't need a real medical document to test VLM scanning — push the included thumbnail:
+
+```bash
+# Push the test image to the device's Downloads folder
+adb push /Users/cvk/Downloads/CODELocalProjects/health-passport-android/docs/thumbnail.jpg /sdcard/Download/thumbnail.jpg
+```
+
+Then in the app:
+1. After loading OmniNeural-4B, tap the **image icon** (bottom of chat)
+2. Navigate to **Downloads/** and select `thumbnail.jpg`
+3. Type "What does this document say?" and tap **Send**
 
 ---
 

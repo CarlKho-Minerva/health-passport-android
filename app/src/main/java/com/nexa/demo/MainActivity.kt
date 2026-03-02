@@ -919,6 +919,11 @@ ___
         try {
             val baseJson = assets.open("model_list.json").bufferedReader().use { it.readText() }
             modelList = Json.decodeFromString<List<ModelData>>(baseJson)
+            // Spinner is hidden in layout — default to first model (OmniNeural-4B)
+            // so Download button doesn't crash with NoSuchElementException on empty selectModelId
+            if (selectModelId.isEmpty() && modelList.isNotEmpty()) {
+                selectModelId = modelList[0].id
+            }
         } catch (e: Exception) {
             Log.e("nfl", "parseModelList: $e")
         }
@@ -1874,6 +1879,10 @@ IMPORTANT: All processing happens on-device. No data is sent to any server. This
             binding.llDownloading.visibility = View.GONE
         }
         btnDownload.setOnClickListener {
+            // Guard: if spinner was never shown, default to first model
+            if (selectModelId.isEmpty() && modelList.isNotEmpty()) {
+                selectModelId = modelList[0].id
+            }
             if (downloadState == DownloadState.DOWNLOADING) {
                 if (downloadingModelData?.id == selectModelId) {
                     binding.llDownloading.visibility = View.VISIBLE
