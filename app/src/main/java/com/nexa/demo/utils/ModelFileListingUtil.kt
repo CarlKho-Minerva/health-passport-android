@@ -82,10 +82,23 @@ object ModelFileListingUtil {
     }
 
     /**
+     * Extracts HF repo ID directly from a HuggingFace URL.
+     * e.g., "https://huggingface.co/NexaAI/Llama3.2-3B-NPU-Turbo-NPU-mobile" -> "NexaAI/Llama3.2-3B-NPU-Turbo-NPU-mobile"
+     * @return repo ID like "owner/repo", or null if URL doesn't match
+     */
+    fun extractHfRepoId(url: String): String? {
+        val regex = Regex("huggingface\\.co/([^/]+/[^/?#]+)")
+        return regex.find(url)?.groupValues?.get(1)?.trimEnd('/')
+    }
+
+    /**
      * Constructs HF repo ID from S3 URL.
+     * If the URL is already a HuggingFace URL, extracts the repo ID directly.
      * @return repo ID in format "NexaAI/{repo_name}"
      */
     fun getHfRepoId(s3Url: String): String {
+        // If it's already an HF URL, extract directly to avoid misparse
+        extractHfRepoId(s3Url)?.let { return it }
         val repoName = extractRepoNameFromS3Url(s3Url)
         return "$HF_OWNER/$repoName"
     }
@@ -111,14 +124,27 @@ object ModelFileListingUtil {
         baseUrl: String,
         client: OkHttpClient
     ): FileListResult = withContext(Dispatchers.IO) {
-        // Try S3 first
+        // If baseUrl is already a HuggingFace URL, go straight to HF listing
+        val directHfRepoId = extractHfRepoId(baseUrl)
+        if (directHfRepoId != null) {
+            Log.d(TAG, "HuggingFace URL detected, listing directly: $directHfRepoId")
+            val hfFiles = listFilesFromHuggingFace(directHfRepoId, client)
+            if (hfFiles.isNotEmpty()) {
+                Log.d(TAG, "Successfully listed ${hfFiles.size} files from HuggingFace: $directHfRepoId")
+                return@withContext FileListResult(hfFiles, FileListResult.Source.HUGGINGFACE, directHfRepoId)
+            }
+            Log.e(TAG, "Failed to list files from HuggingFace: $directHfRepoId")
+            return@withContext FileListResult(emptyList(), FileListResult.Source.FAILED)
+        }
+
+        // Try S3 first (for actual S3 URLs)
         val s3Files = listFilesFromS3(baseUrl, client)
         if (s3Files.isNotEmpty()) {
             Log.d(TAG, "Successfully listed ${s3Files.size} files from S3")
             return@withContext FileListResult(s3Files, FileListResult.Source.S3)
         }
 
-        // Fallback to Hugging Face
+        // Fallback to Hugging Face (derive repo ID from S3 URL)
         Log.w(TAG, "S3 listing failed, falling back to Hugging Face")
         val repoId = getHfRepoId(baseUrl)
         val hfFiles = listFilesFromHuggingFace(repoId, client)
