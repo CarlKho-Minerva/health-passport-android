@@ -157,8 +157,10 @@ class MainActivity : FragmentActivity() {
     private lateinit var etInput: EditText
     private lateinit var btnAskDoctor: Button
     private lateinit var btnSaveVault: Button
+    private lateinit var btnNewChat: ImageButton
     private lateinit var btnAddImage: Button
     private lateinit var btnAudioRecord: Button
+    private var hkSystemPrompt: String = ""
 
     private lateinit var tvHeaderTitle: TextView
     private lateinit var tvPrivacyBadge: TextView
@@ -323,6 +325,7 @@ class MainActivity : FragmentActivity() {
 
         btnAskDoctor = findViewById(R.id.btn_ask_doctor)
         btnSaveVault = findViewById(R.id.btn_save_vault)
+        btnNewChat = findViewById(R.id.btn_new_chat)
         scrollImages = findViewById(R.id.scroll_images)
         topScrollContainer = findViewById(R.id.ll_images_container)
         llLoading = findViewById(R.id.ll_loading)
@@ -1126,15 +1129,19 @@ Core directives:
 1. ALWAYS reference the patient's health records when answering. Cite specific data (dates, values, meds) from the records.
 2. Be precise and evidence-based. Specify dosage, frequency, and mechanism when discussing medications.
 3. If records contain relevant data, analyze and synthesize across systems (e.g., medication interactions, timeline patterns).
-4. If records don't cover the topic, say "Your health vault doesn't have records about this yet."
+4. If records don't cover the topic, say "Your health vault doesn't have records about this yet — would you like to save this to the vault?"
 5. When analyzing scanned documents: identify document type, key findings, medications, and action items.
 6. Keep responses concise. Use bold for emphasis. No unnecessary fluff.
 7. The patient travels internationally — factor in medication availability and regional healthcare context when relevant.
+8. After answering, if there is relevant follow-up to explore, end with a brief one-line suggestion. Example: "Want me to cross-check this with your active medications?" or "Should I look at your timeline for related visits?"
 
 You are a clinical tool, not a replacement for in-person care. Flag when something needs urgent professional attention.
 """
         // Use the full detailed prompt for both VLM and LLM
         addSystemPrompt(sysPrompt)
+
+        // Load HK (housekeeping / medical record keeper) system prompt from vault
+        loadHkSystemPrompt()
 
         // Tutorial pattern: Check for bundled models in assets, then auto-detect pre-placed
         copyBundledModels()
@@ -1193,6 +1200,119 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 listOf(VlmContent("text", vlmPrompt))
             )
         vlmChatList.add(vlmSystemPrompty)
+    }
+
+    /**
+     * Load the HK (housekeeping / medical record keeper) system prompt from the vault.
+     * This prompt is used by the "Save to Vault" button to instruct the LLM
+     * to organize and file medical data according to the vault structure.
+     */
+    private fun loadHkSystemPrompt() {
+        try {
+            val promptFile = File(healthVaultDir, "04_System_Prompt/hk_system_prompt.md")
+            if (promptFile.exists()) {
+                hkSystemPrompt = promptFile.readText().trim()
+                Log.d(TAG, "HK system prompt loaded (${hkSystemPrompt.length} chars)")
+            } else {
+                hkSystemPrompt = "You are a medical record keeper. Organize the following medical data into structured markdown. Identify document type, key findings, medications, and action items. Output a well-structured health record entry with date, category, and details."
+                Log.w(TAG, "HK prompt file not found, using fallback")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading HK prompt", e)
+            hkSystemPrompt = "Organize the following medical data into a structured health record."
+        }
+    }
+
+    /**
+     * "Save to Vault" button action — sends input through LLM with the HK system prompt
+     * instead of the Doctor prompt. The LLM acts as a medical record keeper,
+     * organizing and filing data according to the vault's CRUD rules.
+     */
+    private fun sendWithHkPrompt() {
+        val inputString = etInput.text.trim().toString()
+        // Also gather last assistant response as context if no text typed
+        val lastAssistant = messages.lastOrNull { it.type == MessageType.ASSISTANT }
+        val contextToSave = if (inputString.isNotEmpty()) {
+            inputString
+        } else if (lastAssistant != null && lastAssistant.content.isNotBlank()) {
+            lastAssistant.content
+        } else {
+            Toast.makeText(this, "Nothing to save — chat or scan first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (!isLoadLlmModel) {
+            // No LLM loaded — direct save as raw record
+            saveHealthRecord("## Raw Note\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$contextToSave")
+            etInput.setText("")
+            return
+        }
+
+        // Show in chat
+        if (inputString.isNotEmpty()) {
+            messages.add(Message(inputString, MessageType.USER))
+            etInput.setText("")
+        }
+        messages.add(Message("*Filing to health vault...*", MessageType.ASSISTANT))
+        reloadRecycleView()
+        etInput.clearFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(etInput.windowToken, 0)
+
+        // Build a one-shot chat with HK prompt instead of Doctor prompt
+        modelScope.launch {
+            val hkChatList = mutableListOf<ChatMessage>()
+            hkChatList.add(ChatMessage("system", hkSystemPrompt))
+
+            // Include vault structure context so LLM knows available files
+            val vaultContext = buildVaultStructureContext()
+            if (vaultContext.isNotBlank()) {
+                hkChatList.add(ChatMessage("user", "Current vault structure:\n$vaultContext"))
+                hkChatList.add(ChatMessage("assistant", "Understood. I'll organize new data according to this structure."))
+            }
+
+            hkChatList.add(ChatMessage("user", "Process this medical data and tell me what changes you'd make:\n\n$contextToSave"))
+
+            llmWrapper.applyChatTemplate(hkChatList.toTypedArray(), null, enableThinking)
+                .onSuccess { templateOutput ->
+                    val sb = StringBuilder()
+                    lastTokenForRepeatCheck = ""
+                    repeatTokenCount = 0
+                    streamStopRequested = false
+                    lastUiUpdateMs = 0L
+                    llmWrapper.generateStreamFlow(
+                        templateOutput.formattedText,
+                        GenerationConfigSample().toGenerationConfig(null)
+                    ).collect { streamResult ->
+                        handleResult(sb, streamResult)
+                    }
+                    // After HK response, auto-save the organized output
+                    val organized = sb.toString().trim()
+                    if (organized.isNotBlank()) {
+                        saveHealthRecord(organized)
+                    }
+                }.onFailure { error ->
+                    runOnUiThread {
+                        messages.add(Message("Error filing to vault: ${error.message}", MessageType.PROFILE))
+                        reloadRecycleView()
+                    }
+                }
+        }
+    }
+
+    /**
+     * Build a brief summary of the vault folder structure for LLM context.
+     */
+    private fun buildVaultStructureContext(): String {
+        if (!::healthVaultDir.isInitialized || !healthVaultDir.exists()) return ""
+        val sb = StringBuilder()
+        healthVaultDir.walkTopDown().maxDepth(2).forEach { file ->
+            val rel = file.relativeTo(healthVaultDir).path
+            if (rel.isNotBlank()) {
+                sb.appendLine(if (file.isDirectory) "$rel/" else rel)
+            }
+        }
+        return sb.toString().take(2000)
     }
 
     private fun getHfToken(model: ModelData, url: String): String? {
@@ -1341,7 +1461,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 runOnUiThread {
                     Toast.makeText(
                         this@MainActivity,
-                        "⚠️ Non-Snapdragon device. NPU/GPU plugins may fail. Use QDC or mock mode.",
+                        "Non-Snapdragon device. NPU/GPU plugins may fail. Use QDC or mock mode.",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -2226,7 +2346,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
                 when {
                     isLoaded -> {
-                        text = "Loaded ✓"
+                        text = "Loaded"
                         setTextColor(Color.parseColor("#10B981"))
                         setBackgroundColor(Color.TRANSPARENT)
                         isEnabled = false
@@ -2292,16 +2412,22 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             startRecord()
         }
 
-        // Save to Vault button — saves last assistant response as health record
+        // Save to Vault — routes input through LLM with HK (housekeeping) system prompt
         btnSaveVault.setOnClickListener {
-            saveLastResponseToVault()
+            sendWithHkPrompt()
         }
 
-        // Long-press on Save to Vault → clear chat history
-        btnSaveVault.setOnLongClickListener {
-            clearHistory()
-            Toast.makeText(this, "Chat cleared", Toast.LENGTH_SHORT).show()
-            true
+        // New Chat button — clear with confirmation
+        btnNewChat.setOnClickListener {
+            if (messages.isEmpty()) return@setOnClickListener
+            AlertDialog.Builder(this, R.style.DarkBottomSheetDialog)
+                .setTitle("New Chat")
+                .setMessage("Clear this conversation?")
+                .setPositiveButton("Clear") { _, _ ->
+                    clearHistory()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
 
         btnSelectModelFile.setOnClickListener {
@@ -2676,11 +2802,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                                         ).collect { handleResult(asrSb, it) }
                                     }
                             } else if (transcript.isNotBlank()) {
-                                // ASR only, no LLM — offer next actions
-                                addFollowUpChips(
-                                    primaryLabel = "🩺 Ask Doctor about this",
-                                    secondaryLabel = "💾 Save to Vault"
-                                )
+                                // ASR only, no LLM — transcript shown, user can tap Save to Vault
                             }
                         }.onFailure { error ->
                             runOnUiThread {
@@ -2735,11 +2857,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                                         }
                                     }
                             } else if (fullText.isNotBlank()) {
-                                // OCR only, no LLM — show chips to offer analysis
-                                addFollowUpChips(
-                                    primaryLabel = "🩺 Ask Doctor about this",
-                                    secondaryLabel = "✅ Already saved"
-                                )
+                                // OCR only, no LLM — already auto-saved raw text
                             }
                         }.onFailure { error ->
                             runOnUiThread {
@@ -2999,7 +3117,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         }
                     }
                     runOnUiThread {
-                        val errorMsg = "⚠️ Model produced repetitive output and was stopped.\n\n" +
+                        val errorMsg = "Model produced repetitive output and was stopped.\n\n" +
                             "**Try:**\n" +
                             "- Clear chat and retry\n" +
                             "- Use a different model (Qwen3-4B LLM recommended)\n" +
@@ -3077,16 +3195,13 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     val decodingSpeed =
                         String.format(null, "%.2f", streamResult.profile.decodingSpeed)
 
-                    // Only show developer perf metrics when Advanced Mode is active
-                    if (llAdvancedControls.visibility == View.VISIBLE) {
-                        val profileData =
-                            "TTFT: $ttft ms; Prompt Tokens: $promptTokens; \nPrefilling Speed: $prefillSpeed tok/s\nGenerated Tokens: $generatedTokens; Decoding Speed: $decodingSpeed tok/s"
-                        messages.add(Message(profileData, MessageType.PROFILE))
+                    // Attach perf data to the assistant message — revealed on long-press
+                    val profileData =
+                        "TTFT: $ttft ms | Prompt: $promptTokens tok\nPrefill: $prefillSpeed tok/s | Decode: $decodingSpeed tok/s\nGenerated: $generatedTokens tok"
+                    if (messages.isNotEmpty() && messages.last().type == MessageType.ASSISTANT) {
+                        messages.last().perfData = profileData
                     }
                     reloadRecycleView()
-
-                    // Add contextual follow-up chips after LLM response
-                    addFollowUpChips()
                 }
                 Log.d(TAG, "Completed: ${streamResult.profile}")
             }
@@ -3559,65 +3674,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    /**
-     * Save the last assistant response in chat to the health vault.
-     * Used by "Save to Vault" button and follow-up action chips.
-     */
-    private fun saveLastResponseToVault() {
-        // Find last assistant message
-        val lastAssistant = messages.lastOrNull { it.type == MessageType.ASSISTANT }
-        if (lastAssistant != null && lastAssistant.content.isNotBlank()) {
-            saveHealthRecord(lastAssistant.content)
-        } else {
-            // If no assistant message, check for user input to save
-            val inputText = etInput.text.trim().toString()
-            if (inputText.isNotEmpty()) {
-                saveHealthRecord("## Manual Note\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$inputText")
-                etInput.setText("")
-            } else {
-                Toast.makeText(this, "Nothing to save — chat or scan first", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
 
-    /**
-     * Add follow-up action chips after an LLM/OCR response.
-     * Shows contextual buttons like "Save to Vault" / "Ask more" / "Ask Doctor".
-     */
-    private fun addFollowUpChips(
-        primaryLabel: String = "💬 Ask more",
-        secondaryLabel: String = "💾 Save to Vault",
-        primaryAction: (() -> Unit)? = null,
-        secondaryAction: (() -> Unit)? = null
-    ) {
-        // Helper: dismiss chip row then run the real action. Runs on UI thread
-        // (click listeners always fire on UI thread), so direct list mutation is safe.
-        fun dismissThenRun(action: () -> Unit): () -> Unit = {
-            messages.removeAll { it.type == MessageType.ACTION_CHIPS }
-            reloadRecycleView()
-            action()
-        }
-
-        runOnUiThread {
-            // Remove any existing chip messages first
-            messages.removeAll { it.type == MessageType.ACTION_CHIPS }
-            messages.add(Message(
-                content = "",
-                type = MessageType.ACTION_CHIPS,
-                chipPrimaryLabel = primaryLabel,
-                chipSecondaryLabel = secondaryLabel,
-                chipPrimaryAction = dismissThenRun(primaryAction ?: {
-                    etInput.requestFocus()
-                    val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-                    @Suppress("UNUSED_EXPRESSION")
-                    imm.showSoftInput(etInput, InputMethodManager.SHOW_IMPLICIT)
-                    Unit
-                }),
-                chipSecondaryAction = dismissThenRun(secondaryAction ?: { saveLastResponseToVault() })
-            ))
-            reloadRecycleView()
-        }
-    }
 
     private fun saveHealthRecord(content: String) {
         try {
@@ -3637,7 +3694,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             runOnUiThread {
                 Toast.makeText(
                     this,
-                    "✓ Saved to health records",
+                    "Saved to health records",
                     Toast.LENGTH_SHORT
                 ).show()
             }

@@ -429,32 +429,48 @@
                             android:textSize="12sp"
                             android:visibility="gone" />
 
+                        <!-- New Chat (clear) — subtle left-aligned icon -->
+                        <ImageButton
+                            android:id="@+id/btn_new_chat"
+                            android:layout_width="36dp"
+                            android:layout_height="36dp"
+                            android:layout_marginEnd="8dp"
+                            android:background="@null"
+                            android:src="@drawable/icon_new_chat"
+                            android:scaleType="centerInside"
+                            android:contentDescription="New chat"
+                            android:padding="6dp" />
+
+                        <!-- Spacer pushes buttons to right -->
+                        <View
+                            android:layout_width="0dp"
+                            android:layout_height="0dp"
+                            android:layout_weight="1" />
+
                         <Button
                             android:id="@+id/btn_ask_doctor"
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="36dp"
-                            android:layout_weight="1"
                             android:layout_marginEnd="6dp"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="12dp"
-                            android:background="@drawable/btn_send_accent"
-                            android:text="🩺 Ask Doctor"
+                            android:paddingLeft="16dp"
+                            android:paddingRight="16dp"
+                            android:background="@drawable/btn_rounded_border"
+                            android:text="Ask Doctor"
                             android:textAllCaps="false"
-                            android:textColor="@color/white"
+                            android:textColor="@color/text_primary"
                             android:textSize="12sp"
                             android:fontFamily="sans-serif-medium" />
 
                         <Button
                             android:id="@+id/btn_save_vault"
-                            android:layout_width="0dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="36dp"
-                            android:layout_weight="1"
-                            android:paddingLeft="12dp"
-                            android:paddingRight="12dp"
-                            android:background="@drawable/btn_rounded_border"
-                            android:text="💾 Save to Vault"
+                            android:paddingLeft="16dp"
+                            android:paddingRight="16dp"
+                            android:background="@drawable/btn_send_accent"
+                            android:text="Save to Vault"
                             android:textAllCaps="false"
-                            android:textColor="@color/text_primary"
+                            android:textColor="@color/white"
                             android:textSize="12sp"
                             android:fontFamily="sans-serif-medium" />
                     </LinearLayout>

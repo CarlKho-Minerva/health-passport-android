@@ -38,18 +38,14 @@ data class Message(
     val type: MessageType,
     val images: List<File> = emptyList(),
     val audio: List<File> = emptyList(),
-    val chipPrimaryLabel: String = "",
-    val chipSecondaryLabel: String = "",
-    val chipPrimaryAction: (() -> Unit)? = null,
-    val chipSecondaryAction: (() -> Unit)? = null
+    var perfData: String = ""
 )
 
 enum class MessageType(val value: Int) {
     USER(0),
     ASSISTANT(1),
     PROFILE(2),
-    IMAGES(3),
-    ACTION_CHIPS(4);
+    IMAGES(3);
 
     companion object {
         fun from(value: Int): MessageType =
@@ -74,8 +70,6 @@ class ChatAdapter(private val messages: List<Message>) :
             AiViewHolder(inflater.inflate(R.layout.item_ai_message, parent, false))
         } else if (type == MessageType.IMAGES) {
             ImagesViewHolder(inflater.inflate(R.layout.item_image_message, parent, false))
-        } else if (type == MessageType.ACTION_CHIPS) {
-            ActionChipsViewHolder(inflater.inflate(R.layout.item_action_chips, parent, false))
         } else {
             ProfileViewHolder(inflater.inflate(R.layout.item_profile_message, parent, false))
         }
@@ -87,7 +81,6 @@ class ChatAdapter(private val messages: List<Message>) :
         if (holder is AiViewHolder) holder.bind(message)
         if (holder is ImagesViewHolder) holder.bind(message)
         if (holder is ProfileViewHolder) holder.bind(message)
-        if (holder is ActionChipsViewHolder) holder.bind(message)
     }
 
     override fun getItemCount() = messages.size
@@ -110,6 +103,17 @@ class ChatAdapter(private val messages: List<Message>) :
         fun bind(message: Message) {
             markwon.setMarkdown(tvMessage, message.content.trim())
             tvMessage.movementMethod = LinkMovementMethod.getInstance()
+            // Long-press on AI response reveals dev metrics if available
+            if (message.perfData.isNotBlank()) {
+                itemView.setOnLongClickListener {
+                    android.widget.Toast.makeText(
+                        itemView.context, message.perfData, android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    true
+                }
+            } else {
+                itemView.setOnLongClickListener(null)
+            }
         }
     }
 
@@ -138,28 +142,6 @@ class ChatAdapter(private val messages: List<Message>) :
                 val ivImage = itemView.findViewById<ImageView>(R.id.iv_image)
                 ivImage.setImageURI(Uri.fromFile(file))
                 imageContainer.addView(itemView)
-            }
-        }
-    }
-
-    class ActionChipsViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val btnPrimary: Button = itemView.findViewById(R.id.btn_chip_primary)
-        private val btnSecondary: Button = itemView.findViewById(R.id.btn_chip_secondary)
-
-        fun bind(message: Message) {
-            // Reset visibility on rebind — ViewHolder may have been recycled from a
-            // previously-dismissed chip row where we set GONE for instant feedback.
-            itemView.visibility = View.VISIBLE
-            btnPrimary.text = message.chipPrimaryLabel.ifEmpty { "Ask Doctor" }
-            btnSecondary.text = message.chipSecondaryLabel.ifEmpty { "Save to Vault" }
-            btnPrimary.setOnClickListener {
-                // Instant visual feedback; message is removed from list by the action lambda
-                itemView.visibility = View.GONE
-                message.chipPrimaryAction?.invoke()
-            }
-            btnSecondary.setOnClickListener {
-                itemView.visibility = View.GONE
-                message.chipSecondaryAction?.invoke()
             }
         }
     }
