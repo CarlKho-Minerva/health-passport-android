@@ -147,16 +147,19 @@ class ChatAdapter(private val messages: List<Message>) :
         private val btnSecondary: Button = itemView.findViewById(R.id.btn_chip_secondary)
 
         fun bind(message: Message) {
+            // Reset visibility on rebind — ViewHolder may have been recycled from a
+            // previously-dismissed chip row where we set GONE for instant feedback.
+            itemView.visibility = View.VISIBLE
             btnPrimary.text = message.chipPrimaryLabel.ifEmpty { "Ask Doctor" }
             btnSecondary.text = message.chipSecondaryLabel.ifEmpty { "Save to Vault" }
             btnPrimary.setOnClickListener {
-                message.chipPrimaryAction?.invoke()
-                // Hide chips after tap
+                // Instant visual feedback; message is removed from list by the action lambda
                 itemView.visibility = View.GONE
+                message.chipPrimaryAction?.invoke()
             }
             btnSecondary.setOnClickListener {
-                message.chipSecondaryAction?.invoke()
                 itemView.visibility = View.GONE
+                message.chipSecondaryAction?.invoke()
             }
         }
     }

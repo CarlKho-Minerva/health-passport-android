@@ -3068,15 +3068,6 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     val size = messages.size
                     messages[size - 1] = Message(content, MessageType.ASSISTANT)
 
-                    // Auto-save health record if it contains medical data
-                    if (content.contains("## Document Type:") ||
-                        content.contains("### Findings") ||
-                        content.contains("### Medications") ||
-                        content.contains("Document Type:") ||
-                        content.contains("Findings") && content.contains("Medications")) {
-                        saveHealthRecord(content)
-                    }
-
                     val ttft = String.format(null, "%.2f", streamResult.profile.ttftMs)
                     val promptTokens = streamResult.profile.promptTokens
                     val prefillSpeed =
@@ -3086,14 +3077,12 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     val decodingSpeed =
                         String.format(null, "%.2f", streamResult.profile.decodingSpeed)
 
-                    val profileData =
-                        "TTFT: $ttft ms; Prompt Tokens: $promptTokens; \nPrefilling Speed: $prefillSpeed tok/s\nGenerated Tokens: $generatedTokens; Decoding Speed: $decodingSpeed tok/s"
-                    messages.add(
-                        Message(
-                            profileData,
-                            MessageType.PROFILE
-                        )
-                    )
+                    // Only show developer perf metrics when Advanced Mode is active
+                    if (llAdvancedControls.visibility == View.VISIBLE) {
+                        val profileData =
+                            "TTFT: $ttft ms; Prompt Tokens: $promptTokens; \nPrefilling Speed: $prefillSpeed tok/s\nGenerated Tokens: $generatedTokens; Decoding Speed: $decodingSpeed tok/s"
+                        messages.add(Message(profileData, MessageType.PROFILE))
+                    }
                     reloadRecycleView()
 
                     // Add contextual follow-up chips after LLM response
@@ -3601,6 +3590,14 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
         primaryAction: (() -> Unit)? = null,
         secondaryAction: (() -> Unit)? = null
     ) {
+        // Helper: dismiss chip row then run the real action. Runs on UI thread
+        // (click listeners always fire on UI thread), so direct list mutation is safe.
+        fun dismissThenRun(action: () -> Unit): () -> Unit = {
+            messages.removeAll { it.type == MessageType.ACTION_CHIPS }
+            reloadRecycleView()
+            action()
+        }
+
         runOnUiThread {
             // Remove any existing chip messages first
             messages.removeAll { it.type == MessageType.ACTION_CHIPS }
@@ -3609,14 +3606,14 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 type = MessageType.ACTION_CHIPS,
                 chipPrimaryLabel = primaryLabel,
                 chipSecondaryLabel = secondaryLabel,
-                chipPrimaryAction = primaryAction ?: {
+                chipPrimaryAction = dismissThenRun(primaryAction ?: {
                     etInput.requestFocus()
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                     @Suppress("UNUSED_EXPRESSION")
                     imm.showSoftInput(etInput, InputMethodManager.SHOW_IMPLICIT)
                     Unit
-                },
-                chipSecondaryAction = secondaryAction ?: { saveLastResponseToVault() }
+                }),
+                chipSecondaryAction = dismissThenRun(secondaryAction ?: { saveLastResponseToVault() })
             ))
             reloadRecycleView()
         }

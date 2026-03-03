@@ -107,6 +107,17 @@ $ANDROID_HOME/build-tools/36.0.0/apksigner verify --verbose app/build/outputs/ap
    - Address
    - Phone number
    - Email
+   - ``` I've shipped three Android apps to date, none yet published through Play Console.
+
+Health Passport (Feb 2026): On-device medical document scanner built for the Qualcomm × Nexa AI Bounty. Users photograph prescriptions and lab reports; a Vision-Language Model (Qwen VL) runs inference directly on the Qualcomm Hexagon NPU via the Nexa SDK — no cloud upload. Placed Top 3 of 100+ teams. APK was distributed manually via Google Drive. GitHub: github.com/CarlKho-Minerva/health-passport-android
+
+Nailbite Tracker (2024): Wear OS app for the Pixel Watch that detects hand-to-mouth gestures using accelerometer data. A 14-day N=1 experiment showed 80% reduction in nail-biting episodes. Distributed as a sideloaded APK.
+
+Distracted Driving Detector (2019): Android app that reads accelerometer data to detect vehicle motion above 20 m/s² and restricts phone usage while driving. Built in 3 days for a Grade 10 Innovation Expo. No hardware required.
+
+I'm creating this account to publish Health Passport Phase 2 — a full Play Store release integrating Parakeet speech-to-text, live camera OCR, and longitudinal health record management.
+
+Stack: Kotlin, Jetpack Compose, CameraX, Nexa SDK, PaddleOCR, on-device VLM inference.```
 6. **Wait for verification** — can take 2-7 days for individual accounts
    - Google may ask for ID verification
 
