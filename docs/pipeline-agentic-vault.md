@@ -21,10 +21,10 @@ The root issue: **one prompt can't do classification, routing, reading, formatti
 ## The Multi-Stage Pipeline
 
 Inspired by how an IDE agent like Cursor/Claude:
-1. First *reads* the existing file structure  
-2. *Classifies* what kind of data it received  
-3. *Decides* which file to write to  
-4. *Formats* the entry to match existing style  
+1. First *reads* the existing file structure
+2. *Classifies* what kind of data it received
+3. *Decides* which file to write to
+4. *Formats* the entry to match existing style
 5. *Applies* the diff
 
 We split this into **stages** — each doing one job, with the **app doing the hard routing logic** and the **LLM doing extraction and formatting**.
@@ -35,7 +35,7 @@ We split this into **stages** — each doing one job, with the **app doing the h
 
 ### Stage 1 — Classify + Extract (LLM, silent)
 
-**Prompt type:** Structured output extraction  
+**Prompt type:** Structured output extraction
 **System prompt asks for:**
 ```
 CATEGORY: [medication | lab | eye | cardio | gi | ortho | skin | immune | neuro | genetics | diet | exercise | inventory | visit | therapy | insurance | not_medical]
@@ -43,8 +43,8 @@ SUMMARY: [one-line description]
 ENTITIES: [drug names, dosages, diagnoses, test values, etc.]
 ```
 
-**Why LLM:** Natural language → structured categories. The model is good at reading medical freetext and tagging it.  
-**Why silent (not streamed to UI):** This is a pipeline step, not a response to the user.  
+**Why LLM:** Natural language → structured categories. The model is good at reading medical freetext and tagging it.
+**Why silent (not streamed to UI):** This is a pipeline step, not a response to the user.
 **Fallback:** If LLM fails or returns blank → skip to inbox save.
 
 ---
@@ -196,10 +196,10 @@ The `example-plan-nexareference.md` shows how an IDE agent handled pharmacogenom
 ## Limitations vs. the IDE Agent
 
 The IDE agent (Claude/GPT-4) can:
-- Read arbitrary file trees dynamically  
-- Diff-preview changes before applying  
-- Create new files based on reasoning  
-- Handle binary files (BAM, FASTQ, VCF)  
+- Read arbitrary file trees dynamically
+- Diff-preview changes before applying
+- Create new files based on reasoning
+- Handle binary files (BAM, FASTQ, VCF)
 
 Our 4B on-device model tradeoffs:
 - No file-tree reasoning → we do routing in Kotlin
@@ -216,7 +216,7 @@ Our 4B on-device model tradeoffs:
 - **Stage 3 enhancement**: Include more of the existing file (not just 2000 chars tail) using the full vault ingest from `loadFullVaultContext()`.
 - **`99_Archives/` routing**: If input contains an image or audio reference, route to `99_Archives/` with timestamped filename.
 
-### Medium-term (v1.2)  
+### Medium-term (v1.2)
 - **VLM upgrade**: Current OCR is PaddleOCR (CV model, text extraction only). When Snapdragon 8 Elite device is available, swap in a proper Vision Language Model (e.g. Qwen2-VL-2B-NPU or OmniNeural) that can visually analyze handwriting, charts, and non-text elements. The pipeline stages are the same — only Stage 1 input changes.
 - **Diff preview**: Show a "these changes will be made" card before the user confirms Stage 4 write.
 
