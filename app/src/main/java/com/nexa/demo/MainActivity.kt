@@ -577,20 +577,20 @@ class MainActivity : FragmentActivity() {
                 val file = File(healthVaultDir, path)
                 if (file.exists()) relevantFiles.add(file)
             }
-            // Also include any scanned health records
-            val recordsDir = File(filesDir, "health_records")
-            if (recordsDir.exists()) {
-                recordsDir.listFiles()?.sortedByDescending { it.lastModified() }?.take(3)?.forEach {
+            // Also include recent inbox records (OCR, ASR, HK-organized saves)
+            val inboxDir = File(healthVaultDir, "00_Inbox")
+            if (inboxDir.exists()) {
+                inboxDir.listFiles()?.sortedByDescending { it.lastModified() }?.take(3)?.forEach {
                     relevantFiles.add(it)
                 }
             }
         }
 
-        // Read file contents, limit to ~6000 chars total for rich context
+        // Read file contents, limit to ~8000 chars total for rich context
         val contextBuilder = StringBuilder()
         contextBuilder.append("--- HEALTH VAULT CONTEXT ---\n")
         var totalChars = 0
-        val maxChars = 6000
+        val maxChars = 8000
 
         for (file in relevantFiles) {
             if (totalChars >= maxChars) break
@@ -2791,6 +2791,10 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                             }
                             // If LLM also loaded, auto-analyze the transcript
                             if (isLoadLlmModel && transcript.isNotBlank()) {
+                                // Auto-save raw transcript before analysis
+                                val record = "## Audio Transcription\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$transcript"
+                                saveHealthRecord(record)
+
                                 val ragPrompt = buildRagPrompt("Analyze this transcribed note: $transcript")
                                 chatList.add(ChatMessage(role = "user", ragPrompt))
                                 llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
@@ -2802,7 +2806,12 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                                         ).collect { handleResult(asrSb, it) }
                                     }
                             } else if (transcript.isNotBlank()) {
-                                // ASR only, no LLM — transcript shown, user can tap Save to Vault
+                                // ASR only, no LLM — auto-save and hint user
+                                val record = "## Audio Transcription\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$transcript"
+                                saveHealthRecord(record)
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, "Transcript saved. Tap Save to Vault to organize it.", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }.onFailure { error ->
                             runOnUiThread {
@@ -3678,15 +3687,16 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
     private fun saveHealthRecord(content: String) {
         try {
-            val healthFilesDir = File(filesDir, "health_records")
-            if (!healthFilesDir.exists()) {
-                healthFilesDir.mkdirs()
+            // Save to health_vault/00_Inbox/ so RAG can find it
+            val inboxDir = File(healthVaultDir, "00_Inbox")
+            if (!inboxDir.exists()) {
+                inboxDir.mkdirs()
             }
 
             val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US)
                 .format(java.util.Date())
             val fileName = "health_record_$timestamp.md"
-            val file = File(healthFilesDir, fileName)
+            val file = File(inboxDir, fileName)
 
             file.writeText(content)
 
@@ -3694,7 +3704,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             runOnUiThread {
                 Toast.makeText(
                     this,
-                    "Saved to health records",
+                    "Saved to vault",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -3869,12 +3879,14 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
     private fun clearHistory() {
         if (isLoadLlmModel) {
             chatList.clear()
+            chatList.add(llmSystemPrompt) // Re-add doctor persona
             modelScope.launch {
                 llmWrapper.reset()
             }
         }
         if (isLoadVlmModel) {
             vlmChatList.clear()
+            vlmChatList.add(vlmSystemPrompty) // Re-add VLM persona
             modelScope.launch {
                 vlmWrapper.reset()
             }
