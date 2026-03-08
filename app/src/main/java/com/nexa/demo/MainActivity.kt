@@ -537,95 +537,64 @@ class MainActivity : FragmentActivity() {
      * Uses keyword matching to find relevant files, reads their content,
      * and returns a context string to prepend to the user's query.
      */
-    private fun loadVaultContext(query: String): String {
+    /**
+     * Full vault ingest — reads ALL markdown files from the health vault
+     * (like git-ingest) so the LLM has complete patient context.
+     * Excludes system prompts and archives to stay within token budget.
+     */
+    private fun loadFullVaultContext(): String {
         if (!::healthVaultDir.isInitialized || !healthVaultDir.exists()) return ""
 
-        val q = query.lowercase()
-        val relevantFiles = mutableListOf<File>()
-
-        // Keyword → file mapping for targeted retrieval
-        val keywordMap = mapOf(
-            listOf("eye", "vision", "glasses", "optical", "myop", "astigmat", "sight", "prescription", "lens") to "01_Body_Systems/01_Head_Eyes_ENT.md",
-            listOf("heart", "cardio", "blood pressure", "bp", "pulse", "cholesterol") to "01_Body_Systems/02_Cardiovascular_Heart.md",
-            listOf("arm", "leg", "bone", "joint", "ortho", "fracture", "limb") to "01_Body_Systems/03_Limbs_Ortho.md",
-            listOf("neuro", "brain", "psych", "mental", "anxiety", "depression", "headache") to "01_Body_Systems/06_Neuro_Psych.md",
-            listOf("lab", "blood test", "cbc", "lipid", "glucose", "baseline", "test result") to "01_Body_Systems/00_Lab_Baselines.md",
-            listOf("med", "drug", "pill", "taking", "medication", "dose", "supplement") to "03_Protocols/Active_Medications.md",
-            listOf("timeline", "history", "when", "visit", "appointment", "date", "past") to "02_Timeline/Medical_Timeline.md"
-        )
-
-        // Find matching files
-        for ((keywords, filePath) in keywordMap) {
-            if (keywords.any { q.contains(it) }) {
-                val file = File(healthVaultDir, filePath)
-                if (file.exists()) relevantFiles.add(file)
-            }
-        }
-
-        // If no specific keyword match, include ALL vault files for broad coverage
-        if (relevantFiles.isEmpty()) {
-            val allVaultFiles = listOf(
-                "01_Body_Systems/01_Head_Eyes_ENT.md",
-                "01_Body_Systems/02_Cardiovascular_Heart.md",
-                "01_Body_Systems/03_Limbs_Ortho.md",
-                "01_Body_Systems/06_Neuro_Psych.md",
-                "01_Body_Systems/00_Lab_Baselines.md",
-                "02_Timeline/Medical_Timeline.md",
-                "03_Protocols/Active_Medications.md"
-            )
-            for (path in allVaultFiles) {
-                val file = File(healthVaultDir, path)
-                if (file.exists()) relevantFiles.add(file)
-            }
-            // Also include recent inbox records (OCR, ASR, HK-organized saves)
-            val inboxDir = File(healthVaultDir, "00_Inbox")
-            if (inboxDir.exists()) {
-                inboxDir.listFiles()?.sortedByDescending { it.lastModified() }?.take(3)?.forEach {
-                    relevantFiles.add(it)
-                }
-            }
-        }
-
-        // Read file contents, limit to ~8000 chars total for rich context
         val contextBuilder = StringBuilder()
-        contextBuilder.append("--- HEALTH VAULT CONTEXT ---\n")
+        contextBuilder.append("--- HEALTH VAULT (FULL CONTEXT) ---\n")
         var totalChars = 0
-        val maxChars = 8000
+        val maxChars = 12000
 
-        for (file in relevantFiles) {
+        // Read all vault .md files except system prompts and archives
+        val vaultFiles = healthVaultDir.walkTopDown()
+            .filter { it.isFile && it.extension == "md" }
+            .filter { !it.path.contains("04_System_Prompt") }
+            .filter { !it.path.contains("04_System_Meta") }
+            .filter { !it.path.contains("99_Archives") }
+            .sortedBy { it.path }
+            .toList()
+
+        for (file in vaultFiles) {
             if (totalChars >= maxChars) break
             try {
-                val content = file.readText()
+                val content = file.readText().trim()
+                if (content.isBlank()) continue
+                val relPath = file.relativeTo(healthVaultDir).path
                 val remaining = maxChars - totalChars
                 val truncated = if (content.length > remaining) content.substring(0, remaining) + "\n[...truncated]" else content
-                contextBuilder.append("\n## ${file.nameWithoutExtension}\n")
+                contextBuilder.append("\n## FILE: $relPath\n")
                 contextBuilder.append(truncated)
                 contextBuilder.append("\n")
-                totalChars += truncated.length
+                totalChars += truncated.length + relPath.length + 12
             } catch (e: Exception) {
                 Log.w(TAG, "Could not read vault file: ${file.name}: ${e.message}")
             }
         }
-        contextBuilder.append("--- END HEALTH VAULT CONTEXT ---\n")
+        contextBuilder.append("--- END HEALTH VAULT ---\n")
 
-        Log.d(TAG, "RAG: loaded ${relevantFiles.size} vault files, ${totalChars} chars")
+        Log.d(TAG, "Vault ingest: ${vaultFiles.size} files, $totalChars chars")
         return contextBuilder.toString()
     }
 
     /**
-     * Build a RAG-augmented prompt: vault context + user question.
+     * Build a RAG-augmented prompt: full vault context + user question.
      */
     private fun buildRagPrompt(userQuery: String): String {
-        val vaultContext = loadVaultContext(userQuery)
+        val vaultContext = loadFullVaultContext()
         if (vaultContext.isBlank()) return userQuery
 
-        return """Based on the patient's health records below, answer their question accurately and concisely.
+        return """Based on the patient's complete health records below, answer their question accurately and concisely.
 
 $vaultContext
 
 Patient's question: $userQuery
 
-Answer based ONLY on the health records above. If the records don't contain relevant information, say so."""
+Answer based on the health records above. If the records don't contain relevant information, say so."""
     }
 
     /**
@@ -991,9 +960,6 @@ ___
     private fun handlePreloadedQuery(query: String): Boolean {
         val q = query.lowercase()
 
-        // Try to load actual vault content for the query
-        val vaultContext = loadVaultContext(query)
-
         // Eye-related queries
         if (q.contains("eye") || q.contains("vision") || q.contains("glasses") ||
             q.contains("optical") || q.contains("myop") || q.contains("astigmat") ||
@@ -1228,9 +1194,15 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
      * instead of the Doctor prompt. The LLM acts as a medical record keeper,
      * organizing and filing data according to the vault's CRUD rules.
      */
+    /**
+     * "Save to Vault" — agentic flow:
+     * 1. LLM evaluates if content has medical relevance
+     * 2. LLM determines which vault file(s) to update
+     * 3. App parses structured output and appends to correct files
+     * 4. Anything unroutable goes to 00_Inbox/ as fallback
+     */
     private fun sendWithHkPrompt() {
         val inputString = etInput.text.trim().toString()
-        // Also gather last assistant response as context if no text typed
         val lastAssistant = messages.lastOrNull { it.type == MessageType.ASSISTANT }
         val contextToSave = if (inputString.isNotEmpty()) {
             inputString
@@ -1242,36 +1214,55 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
         }
 
         if (!isLoadLlmModel) {
-            // No LLM loaded — direct save as raw record
-            saveHealthRecord("## Raw Note\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$contextToSave")
+            saveHealthRecord(contextToSave)
             etInput.setText("")
             return
         }
 
-        // Show in chat
         if (inputString.isNotEmpty()) {
             messages.add(Message(inputString, MessageType.USER))
             etInput.setText("")
         }
-        messages.add(Message("*Filing to health vault...*", MessageType.ASSISTANT))
+        messages.add(Message("*Analyzing and filing to health vault...*", MessageType.ASSISTANT))
         reloadRecycleView()
         etInput.clearFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(etInput.windowToken, 0)
 
-        // Build a one-shot chat with HK prompt instead of Doctor prompt
         modelScope.launch {
+            // Build full vault context so LLM sees ALL existing records
+            val fullVault = loadFullVaultContext()
+
+            // Build agentic HK prompt with routing instructions
+            val agenticPrompt = """$hkSystemPrompt
+
+EXISTING VAULT CONTENTS:
+$fullVault
+
+IMPORTANT: You must output your response in this exact format:
+
+1. First, evaluate: does this data contain medically relevant information? If NOT medically relevant, respond with just: "NOT_RELEVANT: [brief reason]"
+
+2. If relevant, for EACH file you want to update, output a block like this:
+---WRITE_TO: [relative/path/to/file.md]---
+[content to APPEND to that file]
+---END_WRITE---
+
+3. After all WRITE blocks, add a brief human-readable summary of what you filed.
+
+Example output:
+---WRITE_TO: 03_Protocols/Active_Medications.md---
+### Added 2026-03-08
+- Amoxicillin 500mg — 3x daily for 7 days (sinus infection)
+---END_WRITE---
+---WRITE_TO: 02_Timeline/Medical_Timeline.md---
+- **2026-03-08**: Prescribed Amoxicillin for sinus infection
+---END_WRITE---
+Filed antibiotic prescription to Active Medications and Timeline."""
+
             val hkChatList = mutableListOf<ChatMessage>()
-            hkChatList.add(ChatMessage("system", hkSystemPrompt))
-
-            // Include vault structure context so LLM knows available files
-            val vaultContext = buildVaultStructureContext()
-            if (vaultContext.isNotBlank()) {
-                hkChatList.add(ChatMessage("user", "Current vault structure:\n$vaultContext"))
-                hkChatList.add(ChatMessage("assistant", "Understood. I'll organize new data according to this structure."))
-            }
-
-            hkChatList.add(ChatMessage("user", "Process this medical data and tell me what changes you'd make:\n\n$contextToSave"))
+            hkChatList.add(ChatMessage("system", agenticPrompt))
+            hkChatList.add(ChatMessage("user", "Process this data:\n\n$contextToSave"))
 
             llmWrapper.applyChatTemplate(hkChatList.toTypedArray(), null, enableThinking)
                 .onSuccess { templateOutput ->
@@ -1286,10 +1277,58 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     ).collect { streamResult ->
                         handleResult(sb, streamResult)
                     }
-                    // After HK response, auto-save the organized output
-                    val organized = sb.toString().trim()
-                    if (organized.isNotBlank()) {
-                        saveHealthRecord(organized)
+
+                    val response = sb.toString().trim()
+                    if (response.isBlank()) return@onSuccess
+
+                    // Parse and route the LLM's structured output
+                    if (response.startsWith("NOT_RELEVANT")) {
+                        Log.d(TAG, "HK: Content not medically relevant — skipping save")
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity, "No medical data to file", Toast.LENGTH_SHORT).show()
+                        }
+                        return@onSuccess
+                    }
+
+                    val writePattern = Regex("""---WRITE_TO:\s*(.+?)---\s*\n(.*?)---END_WRITE---""", RegexOption.DOT_MATCHES_ALL)
+                    val matches = writePattern.findAll(response).toList()
+
+                    if (matches.isNotEmpty()) {
+                        var filesWritten = 0
+                        for (match in matches) {
+                            val targetPath = match.groupValues[1].trim()
+                            val content = match.groupValues[2].trim()
+                            if (content.isBlank()) continue
+
+                            // Sanitize path — only allow writing within vault
+                            val sanitized = targetPath.replace("..", "").removePrefix("/")
+                            val targetFile = File(healthVaultDir, sanitized)
+
+                            try {
+                                targetFile.parentFile?.mkdirs()
+                                if (targetFile.exists()) {
+                                    // Append to existing file
+                                    targetFile.appendText("\n\n$content")
+                                } else {
+                                    // Create new file
+                                    targetFile.writeText(content)
+                                }
+                                filesWritten++
+                                Log.d(TAG, "HK: Wrote to $sanitized")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "HK: Failed to write $sanitized: ${e.message}")
+                            }
+                        }
+                        runOnUiThread {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Filed to $filesWritten vault file${if (filesWritten != 1) "s" else ""}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    } else {
+                        // Fallback: no structured blocks found, save entire response to inbox
+                        saveHealthRecord(response)
                     }
                 }.onFailure { error ->
                     runOnUiThread {
@@ -1298,21 +1337,6 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     }
                 }
         }
-    }
-
-    /**
-     * Build a brief summary of the vault folder structure for LLM context.
-     */
-    private fun buildVaultStructureContext(): String {
-        if (!::healthVaultDir.isInitialized || !healthVaultDir.exists()) return ""
-        val sb = StringBuilder()
-        healthVaultDir.walkTopDown().maxDepth(2).forEach { file ->
-            val rel = file.relativeTo(healthVaultDir).path
-            if (rel.isNotBlank()) {
-                sb.appendLine(if (file.isDirectory) "$rel/" else rel)
-            }
-        }
-        return sb.toString().take(2000)
     }
 
     private fun getHfToken(model: ModelData, url: String): String? {
