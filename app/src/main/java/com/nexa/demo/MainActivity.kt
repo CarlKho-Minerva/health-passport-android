@@ -1194,12 +1194,94 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
      * instead of the Doctor prompt. The LLM acts as a medical record keeper,
      * organizing and filing data according to the vault's CRUD rules.
      */
+    // ════════════════════════════════════════════════════════════════════════
+    //  AGENTIC VAULT PIPELINE — Multi-stage Save to Vault
+    //
+    //  Stage 1: LLM classifies data + extracts structured medical entities
+    //  Stage 2: App-side routing maps classification → target vault files
+    //  Stage 3: LLM formats extracted data to match each target file's style
+    //  Stage 4: App writes to files + auto-logs to Timeline
+    // ════════════════════════════════════════════════════════════════════════
+
+    /** Classification categories the LLM can assign */
+    private val VAULT_ROUTES = mapOf(
+        "medication" to listOf("03_Protocols/Active_Medications.md"),
+        "lab" to listOf("01_Body_Systems/00_Lab_Baselines.md"),
+        "eye" to listOf("01_Body_Systems/01_Head_Eyes_ENT.md"),
+        "cardio" to listOf("01_Body_Systems/02_Cardiovascular_Heart.md"),
+        "gi" to listOf("01_Body_Systems/02_Metabolic_GI.md"),
+        "ortho" to listOf("01_Body_Systems/03_Limbs_Ortho.md"),
+        "skin" to listOf("01_Body_Systems/04_Skin_Derma.md"),
+        "immune" to listOf("01_Body_Systems/05_Systemic_Immune.md"),
+        "neuro" to listOf("01_Body_Systems/06_Neuro_Psych.md"),
+        "genetics" to listOf("01_Body_Systems/07_Genetics_PGx.md"),
+        "diet" to listOf("03_Protocols/Diet_Plan.md"),
+        "exercise" to listOf("03_Protocols/Physio_Routine.md"),
+        "inventory" to listOf("03_Protocols/Medicine_Inventory.md"),
+        "visit" to listOf("02_Timeline/Medical_Timeline.md"),
+        "therapy" to listOf("05_Therapy/Therapy_Log.md"),
+        "insurance" to listOf("03_Protocols/Insurance_Reimbursement.md")
+    )
+
     /**
-     * "Save to Vault" — agentic flow:
-     * 1. LLM evaluates if content has medical relevance
-     * 2. LLM determines which vault file(s) to update
-     * 3. App parses structured output and appends to correct files
-     * 4. Anything unroutable goes to 00_Inbox/ as fallback
+     * Run an LLM call that doesn't stream to the UI — returns the raw text.
+     * Used for intermediate pipeline stages.
+     */
+    private suspend fun llmCallSilent(systemPrompt: String, userPrompt: String): String? {
+        val tempChat = mutableListOf<ChatMessage>()
+        tempChat.add(ChatMessage("system", systemPrompt))
+        tempChat.add(ChatMessage("user", userPrompt))
+
+        var result: String? = null
+        llmWrapper.applyChatTemplate(tempChat.toTypedArray(), null, enableThinking)
+            .onSuccess { templateOutput ->
+                val sb = StringBuilder()
+                lastTokenForRepeatCheck = ""
+                repeatTokenCount = 0
+                streamStopRequested = false
+                llmWrapper.generateStreamFlow(
+                    templateOutput.formattedText,
+                    GenerationConfigSample().toGenerationConfig(null)
+                ).collect { streamResult ->
+                    when (streamResult) {
+                        is LlmStreamResult.Token -> {
+                            sb.append(streamResult.text)
+                            // Garbage detection same as handleResult
+                            val token = streamResult.text.trim()
+                            if (token.isNotEmpty()) {
+                                if (token == lastTokenForRepeatCheck) repeatTokenCount++
+                                else { lastTokenForRepeatCheck = token; repeatTokenCount = 1 }
+                            }
+                            if (repeatTokenCount >= MAX_REPEAT_TOKENS && !streamStopRequested) {
+                                streamStopRequested = true
+                                try { llmWrapper.stopStream() } catch (_: Exception) {}
+                            }
+                        }
+                        is LlmStreamResult.Completed -> {
+                            lastTokenForRepeatCheck = ""
+                            repeatTokenCount = 0
+                            streamStopRequested = false
+                        }
+                        is LlmStreamResult.Error -> { Log.e(TAG, "Silent LLM error") }
+                    }
+                }
+                result = sb.toString()
+                    .replace(thinkTagRegex, "")
+                    .replace(openThinkTagRegex, "")
+                    .trimStart('\n', ' ')
+            }.onFailure { e ->
+                Log.e(TAG, "Silent LLM call failed: ${e.message}")
+            }
+        return result
+    }
+
+    /**
+     * "Save to Vault" — multi-stage agentic pipeline:
+     *
+     * Stage 1: LLM classifies data type + extracts medical entities
+     * Stage 2: App routes classification → target files, reads their current content
+     * Stage 3: LLM formats entry to match target file style
+     * Stage 4: App appends to files + logs to Timeline
      */
     private fun sendWithHkPrompt() {
         val inputString = etInput.text.trim().toString()
@@ -1223,120 +1305,207 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             messages.add(Message(inputString, MessageType.USER))
             etInput.setText("")
         }
-        messages.add(Message("*Analyzing and filing to health vault...*", MessageType.ASSISTANT))
+        messages.add(Message("*Stage 1/3 — Classifying medical data...*", MessageType.ASSISTANT))
         reloadRecycleView()
         etInput.clearFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(etInput.windowToken, 0)
 
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
         modelScope.launch {
-            // Build full vault context so LLM sees ALL existing records
-            val fullVault = loadFullVaultContext()
+            // ── STAGE 1: Classify + Extract ─────────────────────────────────
+            val classifyPrompt = """You are a medical data classifier. Analyze the input and respond with EXACTLY this format:
 
-            // Build agentic HK prompt with routing instructions
-            val agenticPrompt = """$hkSystemPrompt
+CATEGORY: [one of: medication, lab, eye, cardio, gi, ortho, skin, immune, neuro, genetics, diet, exercise, inventory, visit, therapy, insurance, not_medical]
+SUMMARY: [one-line summary of the medical data]
+ENTITIES: [key medical entities — drug names, dosages, test values, diagnoses, etc.]
 
-EXISTING VAULT CONTENTS:
-$fullVault
+If the data contains MULTIPLE categories, list them comma-separated in CATEGORY.
+If the data is NOT medically relevant at all, use: CATEGORY: not_medical
 
-IMPORTANT: You must output your response in this exact format:
+Examples:
+Input: "Doctor prescribed Amoxicillin 500mg 3x daily for sinus infection"
+CATEGORY: medication,visit
+SUMMARY: New antibiotic prescription for sinus infection
+ENTITIES: Amoxicillin 500mg, 3x daily, 7 days, sinus infection
 
-1. First, evaluate: does this data contain medically relevant information? If NOT medically relevant, respond with just: "NOT_RELEVANT: [brief reason]"
+Input: "My grocery list: eggs, milk, bread"
+CATEGORY: not_medical
+SUMMARY: Non-medical content
+ENTITIES: none"""
 
-2. If relevant, for EACH file you want to update, output a block like this:
----WRITE_TO: [relative/path/to/file.md]---
-[content to APPEND to that file]
----END_WRITE---
+            val stage1Result = llmCallSilent(classifyPrompt, contextToSave)
 
-3. After all WRITE blocks, add a brief human-readable summary of what you filed.
+            if (stage1Result == null || stage1Result.isBlank()) {
+                // LLM failed — fallback to inbox
+                saveHealthRecord(contextToSave)
+                updateStatus("Saved to inbox (classification unavailable)")
+                return@launch
+            }
 
-Example output:
----WRITE_TO: 03_Protocols/Active_Medications.md---
-### Added 2026-03-08
-- Amoxicillin 500mg — 3x daily for 7 days (sinus infection)
----END_WRITE---
----WRITE_TO: 02_Timeline/Medical_Timeline.md---
-- **2026-03-08**: Prescribed Amoxicillin for sinus infection
----END_WRITE---
-Filed antibiotic prescription to Active Medications and Timeline."""
+            Log.d(TAG, "HK Stage 1 result: $stage1Result")
 
-            val hkChatList = mutableListOf<ChatMessage>()
-            hkChatList.add(ChatMessage("system", agenticPrompt))
-            hkChatList.add(ChatMessage("user", "Process this data:\n\n$contextToSave"))
+            // Parse Stage 1 output
+            val categoryLine = stage1Result.lines().firstOrNull {
+                it.trimStart().startsWith("CATEGORY:", ignoreCase = true)
+            }?.substringAfter(":")?.trim()?.lowercase() ?: ""
 
-            llmWrapper.applyChatTemplate(hkChatList.toTypedArray(), null, enableThinking)
-                .onSuccess { templateOutput ->
-                    val sb = StringBuilder()
-                    lastTokenForRepeatCheck = ""
-                    repeatTokenCount = 0
-                    streamStopRequested = false
-                    lastUiUpdateMs = 0L
-                    llmWrapper.generateStreamFlow(
-                        templateOutput.formattedText,
-                        GenerationConfigSample().toGenerationConfig(null)
-                    ).collect { streamResult ->
-                        handleResult(sb, streamResult)
-                    }
+            val summaryLine = stage1Result.lines().firstOrNull {
+                it.trimStart().startsWith("SUMMARY:", ignoreCase = true)
+            }?.substringAfter(":")?.trim() ?: ""
 
-                    val response = sb.toString().trim()
-                    if (response.isBlank()) return@onSuccess
+            val entitiesLine = stage1Result.lines().firstOrNull {
+                it.trimStart().startsWith("ENTITIES:", ignoreCase = true)
+            }?.substringAfter(":")?.trim() ?: ""
 
-                    // Parse and route the LLM's structured output
-                    if (response.startsWith("NOT_RELEVANT")) {
-                        Log.d(TAG, "HK: Content not medically relevant — skipping save")
-                        runOnUiThread {
-                            Toast.makeText(this@MainActivity, "No medical data to file", Toast.LENGTH_SHORT).show()
+            // Check if not medical
+            if (categoryLine.contains("not_medical")) {
+                updateStatus("No medical data detected — not saved")
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "No medical data to file", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // ── STAGE 2: App-side routing ───────────────────────────────────
+            updateStatus("*Stage 2/3 — Routing to vault files...*")
+
+            val categories = categoryLine.split(",").map { it.trim() }
+            val targetFiles = mutableMapOf<String, File>() // relPath → File
+
+            for (cat in categories) {
+                val routes = VAULT_ROUTES[cat] ?: continue
+                for (route in routes) {
+                    val file = File(healthVaultDir, route)
+                    targetFiles[route] = file
+                }
+            }
+
+            // Always add Timeline for every save
+            val timelineFile = findOrCreateTimelineFile(today)
+            if (timelineFile != null) {
+                val relPath = timelineFile.relativeTo(healthVaultDir).path
+                targetFiles[relPath] = timelineFile
+            }
+
+            if (targetFiles.isEmpty()) {
+                // No recognized category — save to inbox as fallback
+                saveHealthRecord(contextToSave)
+                updateStatus("Saved to inbox")
+                return@launch
+            }
+
+            // ── STAGE 3: Format entries for each target file ────────────────
+            updateStatus("*Stage 3/3 — Formatting and filing...*")
+
+            var filesWritten = 0
+            val filesSummary = mutableListOf<String>()
+
+            for ((relPath, targetFile) in targetFiles) {
+                // Read existing file content so LLM can match the style
+                val existingContent = try {
+                    if (targetFile.exists()) targetFile.readText().takeLast(2000) else ""
+                } catch (_: Exception) { "" }
+
+                val isTimeline = relPath.contains("Timeline") || relPath.contains("02_Timeline")
+
+                val formatPrompt = if (isTimeline) {
+                    """You are updating a medical timeline. Add a brief dated entry.
+Output ONLY the new bullet point to append (nothing else).
+Format: - **$today**: [brief outcome]"""
+                } else {
+                    """You are a medical record keeper updating a health vault file.
+The target file is: $relPath
+
+EXISTING FILE CONTENT (tail):
+$existingContent
+
+RULES:
+- Output ONLY the new content to APPEND to this file (not the whole file).
+- Match the formatting style of the existing content.
+- If updating a value that already exists, note the previous value with "(Previous: [old_value] on [date])".
+- Include today's date: $today
+- Be concise and structured. Use markdown."""
+                }
+
+                val formatted = llmCallSilent(
+                    formatPrompt,
+                    "Medical data to file:\nSummary: $summaryLine\nEntities: $entitiesLine\n\nRaw data:\n$contextToSave"
+                )
+
+                if (formatted != null && formatted.isNotBlank()) {
+                    try {
+                        targetFile.parentFile?.mkdirs()
+                        if (targetFile.exists()) {
+                            targetFile.appendText("\n\n$formatted")
+                        } else {
+                            targetFile.writeText("# ${targetFile.nameWithoutExtension.replace("_", " ")}\n\n$formatted")
                         }
-                        return@onSuccess
-                    }
-
-                    val writePattern = Regex("""---WRITE_TO:\s*(.+?)---\s*\n(.*?)---END_WRITE---""", RegexOption.DOT_MATCHES_ALL)
-                    val matches = writePattern.findAll(response).toList()
-
-                    if (matches.isNotEmpty()) {
-                        var filesWritten = 0
-                        for (match in matches) {
-                            val targetPath = match.groupValues[1].trim()
-                            val content = match.groupValues[2].trim()
-                            if (content.isBlank()) continue
-
-                            // Sanitize path — only allow writing within vault
-                            val sanitized = targetPath.replace("..", "").removePrefix("/")
-                            val targetFile = File(healthVaultDir, sanitized)
-
-                            try {
-                                targetFile.parentFile?.mkdirs()
-                                if (targetFile.exists()) {
-                                    // Append to existing file
-                                    targetFile.appendText("\n\n$content")
-                                } else {
-                                    // Create new file
-                                    targetFile.writeText(content)
-                                }
-                                filesWritten++
-                                Log.d(TAG, "HK: Wrote to $sanitized")
-                            } catch (e: Exception) {
-                                Log.e(TAG, "HK: Failed to write $sanitized: ${e.message}")
-                            }
-                        }
-                        runOnUiThread {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Filed to $filesWritten vault file${if (filesWritten != 1) "s" else ""}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    } else {
-                        // Fallback: no structured blocks found, save entire response to inbox
-                        saveHealthRecord(response)
-                    }
-                }.onFailure { error ->
-                    runOnUiThread {
-                        messages.add(Message("Error filing to vault: ${error.message}", MessageType.PROFILE))
-                        reloadRecycleView()
+                        filesWritten++
+                        val shortName = targetFile.nameWithoutExtension
+                        filesSummary.add(shortName)
+                        Log.d(TAG, "HK: Wrote to $relPath")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "HK: Failed to write $relPath: ${e.message}")
                     }
                 }
+            }
+
+            // ── STAGE 4: Update UI with summary ────────────────────────────
+            val resultMsg = if (filesWritten > 0) {
+                "Filed to **$filesWritten** vault file${if (filesWritten != 1) "s" else ""}: ${filesSummary.joinToString(", ")}"
+            } else {
+                "Could not format entries — raw data saved to inbox"
+            }
+
+            if (filesWritten == 0) {
+                saveHealthRecord(contextToSave)
+            }
+
+            updateStatus(resultMsg)
+            runOnUiThread {
+                Toast.makeText(
+                    this@MainActivity,
+                    if (filesWritten > 0) "Filed to $filesWritten vault files" else "Saved to inbox",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
+    }
+
+    /** Update the last assistant message in-place */
+    private fun updateStatus(text: String) {
+        runOnUiThread {
+            if (messages.isNotEmpty() && messages.last().type == MessageType.ASSISTANT) {
+                messages[messages.size - 1] = Message(text, MessageType.ASSISTANT)
+                adapter.notifyItemChanged(messages.size - 1)
+                binding.rvChat.scrollToPosition(messages.size - 1)
+            }
+        }
+    }
+
+    /** Find or create the current year's timeline file */
+    private fun findOrCreateTimelineFile(today: String): File? {
+        if (!::healthVaultDir.isInitialized) return null
+        val year = today.substring(0, 4)
+        val timelineDir = File(healthVaultDir, "02_Timeline")
+        if (!timelineDir.exists()) timelineDir.mkdirs()
+
+        // Look for existing file matching current year
+        val existing = timelineDir.listFiles()?.firstOrNull {
+            it.name.contains(year) && it.extension == "md"
+        }
+        if (existing != null) return existing
+
+        // Also check for a generic timeline file
+        val generic = File(timelineDir, "Medical_Timeline.md")
+        if (generic.exists()) return generic
+
+        // Create new year file
+        val newFile = File(timelineDir, "${year}_Health_Timeline.md")
+        newFile.writeText("# $year Health Timeline\n")
+        return newFile
     }
 
     private fun getHfToken(model: ModelData, url: String): String? {
