@@ -123,7 +123,7 @@ class VaultPipelineTest {
     @Test
     fun `stage1 - handles mixed case and extra whitespace`() {
         val llmOutput = """
-            CATEGORY:   LAB, CARDIO  
+            CATEGORY:   LAB, CARDIO
             SUMMARY:   Lipid panel results
             ENTITIES:   LDL 130, HDL 55, Triglycerides 140
         """.trimIndent()
