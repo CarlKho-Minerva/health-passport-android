@@ -1404,8 +1404,13 @@ ENTITIES: none"""
 
             for ((relPath, targetFile) in targetFiles) {
                 // Read existing file content so LLM can match the style
+                // Take header (structure) + tail (recent entries) for best context
                 val existingContent = try {
-                    if (targetFile.exists()) targetFile.readText().takeLast(2000) else ""
+                    if (targetFile.exists()) {
+                        val text = targetFile.readText()
+                        if (text.length <= 2000) text
+                        else text.take(500) + "\n...\n" + text.takeLast(1500)
+                    } else ""
                 } catch (_: Exception) { "" }
 
                 val isTimeline = relPath.contains("Timeline") || relPath.contains("02_Timeline")
@@ -2988,9 +2993,12 @@ RULES:
                                 val record = "## Audio Transcription\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$transcript"
                                 saveHealthRecord(record)
 
-                                val ragPrompt = buildRagPrompt("Analyze this transcribed note: $transcript")
-                                chatList.add(ChatMessage(role = "user", ragPrompt))
-                                llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                                val asrQuery = "Analyze this transcribed note: $transcript"
+                                val ragPrompt = buildRagPrompt(asrQuery)
+                                chatList.add(ChatMessage(role = "user", asrQuery))
+                                val ragChatList = chatList.dropLast(1).toMutableList()
+                                ragChatList.add(ChatMessage("user", ragPrompt))
+                                llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
                                     .onSuccess { templateOutput ->
                                         val asrSb = StringBuilder()
                                         llmWrapper.generateStreamFlow(
@@ -3044,8 +3052,10 @@ RULES:
                                 }
                                 val analysisPrompt = "Analyze this medical document extracted via OCR. Identify document type, key findings, medications, and action items:\n\n$fullText"
                                 val ragPrompt = buildRagPrompt(analysisPrompt)
-                                chatList.add(ChatMessage(role = "user", ragPrompt))
-                                llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                                chatList.add(ChatMessage(role = "user", analysisPrompt))
+                                val ragChatList = chatList.dropLast(1).toMutableList()
+                                ragChatList.add(ChatMessage("user", ragPrompt))
+                                llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
                                     .onSuccess { templateOutput ->
                                         val ocrSb = StringBuilder()
                                         llmWrapper.generateStreamFlow(
@@ -3125,8 +3135,12 @@ RULES:
                 if (isLoadLlmModel) {
                     val ragPrompt = buildRagPrompt(inputString)
                     Log.d(TAG, "RAG prompt (${ragPrompt.length} chars): ${ragPrompt.take(200)}...")
-                    chatList.add(ChatMessage(role = "user", ragPrompt))
-                    llmWrapper.applyChatTemplate(chatList.toTypedArray(), null, enableThinking)
+                    // Store bare query in history — vault context stays out of chatList
+                    // so it's re-fetched fresh each call and doesn't bloat context window
+                    chatList.add(ChatMessage(role = "user", inputString))
+                    val ragChatList = chatList.dropLast(1).toMutableList()
+                    ragChatList.add(ChatMessage("user", ragPrompt))
+                    llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
                         .onSuccess { templateOutput ->
                             llmWrapper.generateStreamFlow(
                                 templateOutput.formattedText,
