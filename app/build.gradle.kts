@@ -83,12 +83,15 @@ android {
             // libstable-diffusion is part of the Nexa SDK AAR but is not used in this app.
             excludes += "**/libstable-diffusion.so"
             // HTP profiling/tracing readers are only needed for SDK development benchmarks.
-            // Excluding them saves ~6 MB compressed from the base module.
             excludes += "**/libQnnHtpOptraceProfilingReader.so"
             excludes += "**/libQnnChrometraceProfilingReader.so"
             excludes += "**/libQnnHtpProfilingReader.so"
             excludes += "**/libQnnJsonProfilingReader.so"
             excludes += "**/libQnnLpaiProfilingReader.so"
+            // Every libQnn*.so in lib/arm64-v8a is DUPLICATED in assets/npu/htp-files{,-v81}/.
+            // The Nexa SDK loads QNN libs from the assets copies (extracts → writable dir → System.load),
+            // never via System.loadLibrary from lib/. Excluding from jniLibs saves ~47 MB compressed.
+            excludes += "**/libQnn*.so"
         }
     }
 
