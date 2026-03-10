@@ -74,7 +74,22 @@ android {
 //        }
 //    }
     packagingOptions {
-        jniLibs.useLegacyPackaging = true
+        jniLibs {
+            // Compress .so files in the APK (safe for minSdk 27+).
+            // With useLegacyPackaging=true the linker stores them UNCOMPRESSED, which makes the
+            // per-device APK download count toward the 200 MB Play Store limit at full size.
+            // Flipping to false compresses them (188 MB → ~75 MB in the APK).
+            useLegacyPackaging = false
+            // libstable-diffusion is part of the Nexa SDK AAR but is not used in this app.
+            excludes += "**/libstable-diffusion.so"
+            // HTP profiling/tracing readers are only needed for SDK development benchmarks.
+            // Excluding them saves ~6 MB compressed from the base module.
+            excludes += "**/libQnnHtpOptraceProfilingReader.so"
+            excludes += "**/libQnnChrometraceProfilingReader.so"
+            excludes += "**/libQnnHtpProfilingReader.so"
+            excludes += "**/libQnnJsonProfilingReader.so"
+            excludes += "**/libQnnLpaiProfilingReader.so"
+        }
     }
 
     buildFeatures {
@@ -87,6 +102,34 @@ android {
 
 val bridgePathExist = gradle.extra["bridgePathExist"] as Boolean
 print("bridgePathExist: $bridgePathExist\n")
+
+// Strip Snapdragon 8 Elite (v85) NPU runtime from assets (~134 MB).
+// htp-files-v85 targets sm8750 only. QDC device is sm8650 (Snapdragon 8 Gen 3 = v81),
+// so v85 is never used and should not ship in the base module.
+afterEvaluate {
+    for (variantName in listOf("Release", "Debug")) {
+        tasks.findByName("merge${variantName}Assets")?.doLast {
+            outputs.files.forEach { dir ->
+                // Strip Snapdragon 8 Elite (v85) HTP runtime (~134 MB, sm8750 only)
+                File(dir, "npu/htp-files-v85").takeIf { it.exists() }?.deleteRecursively()
+                    ?.also { println("Stripped npu/htp-files-v85 from $dir") }
+                // Strip profiling/tracing reader libs from both HTP asset folders (~6 MB compressed)
+                val profilingPatterns = listOf(
+                    "libQnnHtpOptraceProfilingReader.so",
+                    "libQnnChrometraceProfilingReader.so",
+                    "libQnnHtpProfilingReader.so",
+                    "libQnnJsonProfilingReader.so",
+                    "libQnnLpaiProfilingReader.so"
+                )
+                for (htpDir in listOf("npu/htp-files", "npu/htp-files-v81")) {
+                    for (lib in profilingPatterns) {
+                        File(dir, "$htpDir/$lib").takeIf { it.exists() }?.delete()
+                    }
+                }
+            }
+        }
+    }
+}
 
 dependencies {
 
