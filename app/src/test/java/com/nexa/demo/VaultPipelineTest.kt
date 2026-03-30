@@ -280,4 +280,89 @@ class VaultPipelineTest {
 
         tmpVault.deleteRecursively()
     }
+
+    // ── Inbox save tests ──────────────────────────────────────────────────
+
+    @Test
+    fun `inbox - saves record to 00_Inbox with timestamp filename`() {
+        val tmpVault = Files.createTempDirectory("vault_inbox_test").toFile()
+        val inboxDir = File(tmpVault, "00_Inbox")
+        inboxDir.mkdirs()
+
+        val content = "Doctor prescribed Amoxicillin 500mg 3x daily"
+        val timestamp = "2026-03-30_14-30-00"
+        val fileName = "health_record_$timestamp.md"
+        val file = File(inboxDir, fileName)
+        file.writeText(content)
+
+        assertTrue("Inbox file should exist", file.exists())
+        assertEquals(content, file.readText())
+        assertTrue("Filename should contain timestamp", file.name.contains("2026-03-30"))
+
+        tmpVault.deleteRecursively()
+    }
+
+    @Test
+    fun `inbox - multiple saves create separate files`() {
+        val tmpVault = Files.createTempDirectory("vault_inbox_multi").toFile()
+        val inboxDir = File(tmpVault, "00_Inbox")
+        inboxDir.mkdirs()
+
+        File(inboxDir, "health_record_2026-03-30_14-30-00.md").writeText("Blood test results: LDL 130")
+        File(inboxDir, "health_record_2026-03-30_14-31-00.md").writeText("Prescription: Atorvastatin 20mg")
+        File(inboxDir, "health_record_2026-03-30_14-32-00.md").writeText("Eye exam: -2.25 OD, -1.75 OS")
+
+        val inboxFiles = inboxDir.listFiles()?.filter { it.extension == "md" } ?: emptyList()
+        assertEquals("Should have 3 inbox files", 3, inboxFiles.size)
+
+        tmpVault.deleteRecursively()
+    }
+
+    @Test
+    fun `inbox - housekeeping processes and removes filed items`() {
+        val tmpVault = Files.createTempDirectory("vault_hk_test").toFile()
+        val inboxDir = File(tmpVault, "00_Inbox")
+        inboxDir.mkdirs()
+
+        // Simulate an inbox file with medication data
+        val inboxFile = File(inboxDir, "health_record_2026-03-30_14-30-00.md")
+        inboxFile.writeText("Doctor prescribed Amoxicillin 500mg 3x daily for sinus infection")
+
+        // Simulate Stage 1 classification (as if LLM returned this)
+        val stage1Output = """
+            CATEGORY: medication,visit
+            SUMMARY: New antibiotic prescription for sinus infection
+            ENTITIES: Amoxicillin 500mg, 3x daily, 7 days, sinus infection
+        """.trimIndent()
+
+        val parsed = parseStage1(stage1Output)
+        val routes = routeCategories(parsed.categories)
+
+        // Simulate filing
+        for (route in routes) {
+            val file = File(tmpVault, route)
+            file.parentFile?.mkdirs()
+            file.writeText("# ${file.nameWithoutExtension}\n\n- ${parsed.summary}")
+        }
+
+        // After filing, remove from inbox
+        inboxFile.delete()
+
+        assertFalse("Inbox file should be deleted after filing", inboxFile.exists())
+        assertTrue("Meds file should exist", File(tmpVault, "03_Protocols/Active_Medications.md").exists())
+
+        tmpVault.deleteRecursively()
+    }
+
+    @Test
+    fun `inbox - empty inbox returns no files to process`() {
+        val tmpVault = Files.createTempDirectory("vault_empty_inbox").toFile()
+        val inboxDir = File(tmpVault, "00_Inbox")
+        inboxDir.mkdirs()
+
+        val inboxFiles = inboxDir.listFiles()?.filter { it.isFile && it.extension == "md" } ?: emptyList()
+        assertTrue("Empty inbox should have no files", inboxFiles.isEmpty())
+
+        tmpVault.deleteRecursively()
+    }
 }

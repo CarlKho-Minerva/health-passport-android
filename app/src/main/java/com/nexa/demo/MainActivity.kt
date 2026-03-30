@@ -166,6 +166,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var tvPrivacyBadge: TextView
     private lateinit var tvModelStatus: TextView
     private lateinit var llAdvancedControls: LinearLayout
+    private lateinit var llEmptyState: LinearLayout
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: ChatAdapter
@@ -301,6 +302,26 @@ class MainActivity : FragmentActivity() {
         tvPrivacyBadge = findViewById(R.id.tv_privacy_badge)
         tvModelStatus = findViewById(R.id.tv_model_status)
         llAdvancedControls = findViewById(R.id.ll_advanced_controls)
+        llEmptyState = findViewById(R.id.ll_empty_state)
+
+        // Suggestion chips — "What can I help with?"
+        findViewById<View>(R.id.chip_scan_document).setOnClickListener {
+            showPopupMenu(it) // Same as btnAddImage — camera or gallery
+        }
+        findViewById<View>(R.id.chip_ask_doctor).setOnClickListener {
+            etInput.setText("Give me a health summary")
+            btnAskDoctor.performClick()
+        }
+        findViewById<View>(R.id.chip_record_visit).setOnClickListener {
+            if (isLoadAsrModel) {
+                startRecord()
+            } else {
+                Toast.makeText(this, "Voice model loading... please wait", Toast.LENGTH_SHORT).show()
+            }
+        }
+        findViewById<View>(R.id.chip_organize_records).setOnClickListener {
+            runInboxHousekeeping()
+        }
 
         // Long-press header to toggle advanced mode
         tvHeaderTitle.setOnLongClickListener {
@@ -330,6 +351,9 @@ class MainActivity : FragmentActivity() {
         topScrollContainer = findViewById(R.id.ll_images_container)
         llLoading = findViewById(R.id.ll_loading)
         vTip = findViewById<View>(R.id.v_tip)
+
+        // Show empty state on first launch
+        updateEmptyState()
 
         btnAudioCancel.setOnClickListener {
             stopRecord(true)
@@ -1276,12 +1300,9 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
     }
 
     /**
-     * "Save to Vault" — multi-stage agentic pipeline:
-     *
-     * Stage 1: LLM classifies data type + extracts medical entities
-     * Stage 2: App routes classification → target files, reads their current content
-     * Stage 3: LLM formats entry to match target file style
-     * Stage 4: App appends to files + logs to Timeline
+     * "Save to Vault" — Always saves to inbox first (instant, no LLM needed).
+     * User can tap "Organize records" later to run the agentic pipeline
+     * and move inbox items into the proper vault files.
      */
     private fun sendWithHkPrompt() {
         val inputString = etInput.text.trim().toString()
@@ -1295,188 +1316,17 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             return
         }
 
-        if (!isLoadLlmModel) {
-            saveHealthRecord(contextToSave)
-            etInput.setText("")
-            return
-        }
-
+        // Always save to inbox immediately (hard-coded, instant, no LLM)
+        saveHealthRecord(contextToSave)
         if (inputString.isNotEmpty()) {
             messages.add(Message(inputString, MessageType.USER))
-            etInput.setText("")
         }
-        messages.add(Message("*Stage 1/3 — Classifying medical data...*", MessageType.ASSISTANT))
+        etInput.setText("")
+
+        val inboxCount = File(healthVaultDir, "00_Inbox").listFiles()?.count { it.extension == "md" } ?: 0
+        val msg = "Saved to inbox. You have **$inboxCount** item${if (inboxCount != 1) "s" else ""} ready to organize."
+        messages.add(Message(msg, MessageType.ASSISTANT))
         reloadRecycleView()
-        etInput.clearFocus()
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(etInput.windowToken, 0)
-
-        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-
-        modelScope.launch {
-            // ── STAGE 1: Classify + Extract ─────────────────────────────────
-            val classifyPrompt = """You are a medical data classifier. Analyze the input and respond with EXACTLY this format:
-
-CATEGORY: [one of: medication, lab, eye, cardio, gi, ortho, skin, immune, neuro, genetics, diet, exercise, inventory, visit, therapy, insurance, not_medical]
-SUMMARY: [one-line summary of the medical data]
-ENTITIES: [key medical entities — drug names, dosages, test values, diagnoses, etc.]
-
-If the data contains MULTIPLE categories, list them comma-separated in CATEGORY.
-If the data is NOT medically relevant at all, use: CATEGORY: not_medical
-
-Examples:
-Input: "Doctor prescribed Amoxicillin 500mg 3x daily for sinus infection"
-CATEGORY: medication,visit
-SUMMARY: New antibiotic prescription for sinus infection
-ENTITIES: Amoxicillin 500mg, 3x daily, 7 days, sinus infection
-
-Input: "My grocery list: eggs, milk, bread"
-CATEGORY: not_medical
-SUMMARY: Non-medical content
-ENTITIES: none"""
-
-            val stage1Result = llmCallSilent(classifyPrompt, contextToSave)
-
-            if (stage1Result == null || stage1Result.isBlank()) {
-                // LLM failed — fallback to inbox
-                saveHealthRecord(contextToSave)
-                updateStatus("Saved to inbox (classification unavailable)")
-                return@launch
-            }
-
-            Log.d(TAG, "HK Stage 1 result: $stage1Result")
-
-            // Parse Stage 1 output
-            val categoryLine = stage1Result.lines().firstOrNull {
-                it.trimStart().startsWith("CATEGORY:", ignoreCase = true)
-            }?.substringAfter(":")?.trim()?.lowercase() ?: ""
-
-            val summaryLine = stage1Result.lines().firstOrNull {
-                it.trimStart().startsWith("SUMMARY:", ignoreCase = true)
-            }?.substringAfter(":")?.trim() ?: ""
-
-            val entitiesLine = stage1Result.lines().firstOrNull {
-                it.trimStart().startsWith("ENTITIES:", ignoreCase = true)
-            }?.substringAfter(":")?.trim() ?: ""
-
-            // Check if not medical
-            if (categoryLine.contains("not_medical")) {
-                updateStatus("No medical data detected — not saved")
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "No medical data to file", Toast.LENGTH_SHORT).show()
-                }
-                return@launch
-            }
-
-            // ── STAGE 2: App-side routing ───────────────────────────────────
-            updateStatus("*Stage 2/3 — Routing to vault files...*")
-
-            val categories = categoryLine.split(",").map { it.trim() }
-            val targetFiles = mutableMapOf<String, File>() // relPath → File
-
-            for (cat in categories) {
-                val routes = VAULT_ROUTES[cat] ?: continue
-                for (route in routes) {
-                    val file = File(healthVaultDir, route)
-                    targetFiles[route] = file
-                }
-            }
-
-            // Always add Timeline for every save
-            val timelineFile = findOrCreateTimelineFile(today)
-            if (timelineFile != null) {
-                val relPath = timelineFile.relativeTo(healthVaultDir).path
-                targetFiles[relPath] = timelineFile
-            }
-
-            if (targetFiles.isEmpty()) {
-                // No recognized category — save to inbox as fallback
-                saveHealthRecord(contextToSave)
-                updateStatus("Saved to inbox")
-                return@launch
-            }
-
-            // ── STAGE 3: Format entries for each target file ────────────────
-            updateStatus("*Stage 3/3 — Formatting and filing...*")
-
-            var filesWritten = 0
-            val filesSummary = mutableListOf<String>()
-
-            for ((relPath, targetFile) in targetFiles) {
-                // Read existing file content so LLM can match the style
-                // Take header (structure) + tail (recent entries) for best context
-                val existingContent = try {
-                    if (targetFile.exists()) {
-                        val text = targetFile.readText()
-                        if (text.length <= 2000) text
-                        else text.take(500) + "\n...\n" + text.takeLast(1500)
-                    } else ""
-                } catch (_: Exception) { "" }
-
-                val isTimeline = relPath.contains("Timeline") || relPath.contains("02_Timeline")
-
-                val formatPrompt = if (isTimeline) {
-                    """You are updating a medical timeline. Add a brief dated entry.
-Output ONLY the new bullet point to append (nothing else).
-Format: - **$today**: [brief outcome]"""
-                } else {
-                    """You are a medical record keeper updating a health vault file.
-The target file is: $relPath
-
-EXISTING FILE CONTENT (tail):
-$existingContent
-
-RULES:
-- Output ONLY the new content to APPEND to this file (not the whole file).
-- Match the formatting style of the existing content.
-- If updating a value that already exists, note the previous value with "(Previous: [old_value] on [date])".
-- Include today's date: $today
-- Be concise and structured. Use markdown."""
-                }
-
-                val formatted = llmCallSilent(
-                    formatPrompt,
-                    "Medical data to file:\nSummary: $summaryLine\nEntities: $entitiesLine\n\nRaw data:\n$contextToSave"
-                )
-
-                if (formatted != null && formatted.isNotBlank()) {
-                    try {
-                        targetFile.parentFile?.mkdirs()
-                        if (targetFile.exists()) {
-                            targetFile.appendText("\n\n$formatted")
-                        } else {
-                            targetFile.writeText("# ${targetFile.nameWithoutExtension.replace("_", " ")}\n\n$formatted")
-                        }
-                        filesWritten++
-                        val shortName = targetFile.nameWithoutExtension
-                        filesSummary.add(shortName)
-                        Log.d(TAG, "HK: Wrote to $relPath")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "HK: Failed to write $relPath: ${e.message}")
-                    }
-                }
-            }
-
-            // ── STAGE 4: Update UI with summary ────────────────────────────
-            val resultMsg = if (filesWritten > 0) {
-                "Filed to **$filesWritten** vault file${if (filesWritten != 1) "s" else ""}: ${filesSummary.joinToString(", ")}"
-            } else {
-                "Could not format entries — raw data saved to inbox"
-            }
-
-            if (filesWritten == 0) {
-                saveHealthRecord(contextToSave)
-            }
-
-            updateStatus(resultMsg)
-            runOnUiThread {
-                Toast.makeText(
-                    this@MainActivity,
-                    if (filesWritten > 0) "Filed to $filesWritten vault files" else "Saved to inbox",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
     }
 
     /** Update the last assistant message in-place */
@@ -4263,6 +4113,155 @@ RULES:
     private fun reloadRecycleView() {
         adapter.notifyDataSetChanged()
         binding.rvChat.scrollToPosition(messages.size - 1)
+        updateEmptyState()
+    }
+
+    /**
+     * Toggle empty state ("What can I help with?") vs chat RecyclerView.
+     * Shows suggestions when chat is empty, hides them once conversation starts.
+     */
+    private fun updateEmptyState() {
+        if (messages.isEmpty()) {
+            llEmptyState.visibility = View.VISIBLE
+            binding.rvChat.visibility = View.GONE
+        } else {
+            llEmptyState.visibility = View.GONE
+            binding.rvChat.visibility = View.VISIBLE
+        }
+    }
+
+    /**
+     * On-demand inbox housekeeping: process any unorganized files in 00_Inbox/
+     * through the agentic vault pipeline (classify → route → format → file).
+     */
+    private fun runInboxHousekeeping() {
+        val inboxDir = File(healthVaultDir, "00_Inbox")
+        if (!inboxDir.exists() || inboxDir.listFiles()?.isEmpty() != false) {
+            Toast.makeText(this, "Inbox is empty — nothing to organize", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val inboxFiles = inboxDir.listFiles()?.filter { it.isFile && it.extension == "md" } ?: emptyList()
+        if (inboxFiles.isEmpty()) {
+            Toast.makeText(this, "No records in inbox to organize", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (!isLoadLlmModel) {
+            Toast.makeText(this, "Load a text model first to organize records", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        messages.add(Message("Organize my inbox (${inboxFiles.size} file${if (inboxFiles.size != 1) "s" else ""})", MessageType.USER))
+        messages.add(Message("*Organizing inbox — processing ${inboxFiles.size} record${if (inboxFiles.size != 1) "s" else ""}...*", MessageType.ASSISTANT))
+        reloadRecycleView()
+
+        modelScope.launch {
+            var processed = 0
+            var filed = 0
+
+            for (file in inboxFiles) {
+                val content = try { file.readText() } catch (_: Exception) { continue }
+                if (content.isBlank()) {
+                    file.delete()
+                    continue
+                }
+
+                processed++
+                updateStatus("*Organizing inbox — ${processed}/${inboxFiles.size}: ${file.nameWithoutExtension}...*")
+
+                // Run through the full agentic pipeline (same as Save to Vault)
+                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+
+                val classifyPrompt = """You are a medical data classifier. Analyze the input and respond with EXACTLY this format:
+
+CATEGORY: [one of: medication, lab, eye, cardio, gi, ortho, skin, immune, neuro, genetics, diet, exercise, inventory, visit, therapy, insurance, not_medical]
+SUMMARY: [one-line summary of the medical data]
+ENTITIES: [key medical entities — drug names, dosages, test values, diagnoses, etc.]
+
+If the data contains MULTIPLE categories, list them comma-separated in CATEGORY.
+If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
+
+                val stage1Result = llmCallSilent(classifyPrompt, content) ?: continue
+
+                val categoryLine = stage1Result.lines().firstOrNull {
+                    it.trimStart().startsWith("CATEGORY:", ignoreCase = true)
+                }?.substringAfter(":")?.trim()?.lowercase() ?: ""
+
+                val summaryLine = stage1Result.lines().firstOrNull {
+                    it.trimStart().startsWith("SUMMARY:", ignoreCase = true)
+                }?.substringAfter(":")?.trim() ?: ""
+
+                val entitiesLine = stage1Result.lines().firstOrNull {
+                    it.trimStart().startsWith("ENTITIES:", ignoreCase = true)
+                }?.substringAfter(":")?.trim() ?: ""
+
+                if (categoryLine.contains("not_medical")) continue
+
+                val categories = categoryLine.split(",").map { it.trim() }
+                val targetFiles = mutableMapOf<String, File>()
+                for (cat in categories) {
+                    val routes = VAULT_ROUTES[cat] ?: continue
+                    for (route in routes) {
+                        targetFiles[route] = File(healthVaultDir, route)
+                    }
+                }
+                val timelineFile = findOrCreateTimelineFile(today)
+                if (timelineFile != null) {
+                    targetFiles[timelineFile.relativeTo(healthVaultDir).path] = timelineFile
+                }
+
+                if (targetFiles.isEmpty()) continue
+
+                var fileFiled = false
+                for ((relPath, targetFile) in targetFiles) {
+                    val existingContent = try {
+                        if (targetFile.exists()) {
+                            val text = targetFile.readText()
+                            if (text.length <= 2000) text
+                            else text.take(500) + "\n...\n" + text.takeLast(1500)
+                        } else ""
+                    } catch (_: Exception) { "" }
+
+                    val isTimeline = relPath.contains("Timeline") || relPath.contains("02_Timeline")
+                    val formatPrompt = if (isTimeline) {
+                        "You are updating a medical timeline. Add a brief dated entry.\nOutput ONLY the new bullet point to append.\nFormat: - **$today**: [brief outcome]"
+                    } else {
+                        "You are a medical record keeper updating: $relPath\n\nEXISTING TAIL:\n$existingContent\n\nOutput ONLY the new content to APPEND. Match existing style. Date: $today"
+                    }
+
+                    val formatted = llmCallSilent(
+                        formatPrompt,
+                        "Summary: $summaryLine\nEntities: $entitiesLine\n\nRaw:\n$content"
+                    ) ?: continue
+
+                    try {
+                        targetFile.parentFile?.mkdirs()
+                        if (targetFile.exists()) {
+                            targetFile.appendText("\n\n$formatted")
+                        } else {
+                            targetFile.writeText("# ${targetFile.nameWithoutExtension.replace("_", " ")}\n\n$formatted")
+                        }
+                        fileFiled = true
+                    } catch (_: Exception) {}
+                }
+
+                if (fileFiled) {
+                    filed++
+                    // Remove from inbox after successful filing
+                    file.delete()
+                }
+            }
+
+            val resultMsg = if (filed > 0) {
+                "Organized **$filed** record${if (filed != 1) "s" else ""} from inbox into vault files."
+            } else if (processed > 0) {
+                "Processed $processed record${if (processed != 1) "s" else ""} but none had medical content to file."
+            } else {
+                "Inbox was empty — nothing to organize."
+            }
+            updateStatus(resultMsg)
+        }
     }
 
     companion object {
