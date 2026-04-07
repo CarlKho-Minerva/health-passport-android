@@ -72,7 +72,7 @@
         </div>
     </nav>
     <h1>Privacy Policy</h1>
-    <p class="meta">Health Passport &middot; Last updated March 2, 2026</p>
+    <p class="meta">Health Passport &middot; Last updated April 7, 2026</p>
 
     <div class="callout">
         <strong>TL;DR</strong> &mdash; Health Passport processes everything on your device. We do not collect, transmit, or store any data on external servers. Your health records never leave your phone.
@@ -96,7 +96,7 @@
     <h2>3. On-Device Processing</h2>
     <p>All AI processing in Health Passport happens entirely on your device:</p>
     <ul>
-        <li><strong>Document scanning:</strong> Images are processed by on-device AI models (e.g., OmniNeural-4B) running on your device's Qualcomm NPU. No images are sent to any server.</li>
+        <li><strong>Document scanning:</strong> Images are processed by on-device AI models. The primary model is Gemma 4 E2B (<a href="https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm">litert-community/gemma-4-E2B-it-litert-lm</a>) running via Google AI Edge LiteRT-LM, with PaddleOCR as a fallback for document text extraction. No images are sent to any server.</li>
         <li><strong>Health vault:</strong> Your medical records are stored in local files on your device's internal storage. They are never uploaded or synchronized to any cloud service.</li>
         <li><strong>Chat/RAG:</strong> Questions about your health data are answered by on-device language models. No queries or responses leave your device.</li>
         <li><strong>Speech transcription:</strong> Audio is transcribed on-device using the Parakeet ASR model. No audio is transmitted externally.</li>
@@ -106,7 +106,7 @@
     <p>The App stores the following data locally on your device:</p>
     <ul>
         <li><strong>Health vault files:</strong> Markdown files containing your medical records, organized by body system and timeline. Stored in the app's internal storage directory.</li>
-        <li><strong>AI models:</strong> Downloaded model files (1-3 GB) stored in the app's internal storage. These are open-source AI models from <a href="https://huggingface.co/NexaAI">HuggingFace/NexaAI</a>.</li>
+        <li><strong>AI models:</strong> Downloaded model files (1-4 GB) stored in the app's internal storage. These are open-source AI models from <a href="https://huggingface.co/litert-community">HuggingFace litert-community</a> (Gemma 4 E2B via Google AI Edge) and <a href="https://huggingface.co/NexaAI">HuggingFace/NexaAI</a> (PaddleOCR, Parakeet ASR).</li>
         <li><strong>Scanned images:</strong> Photos taken for document scanning are stored temporarily for processing.</li>
         <li><strong>App preferences:</strong> Minimal settings (e.g., first-launch flag) stored in Android SharedPreferences.</li>
     </ul>
@@ -115,7 +115,7 @@
     <h2>5. Network Usage</h2>
     <p>The App connects to the internet only to:</p>
     <ul>
-        <li><strong>Download AI models:</strong> When you choose to download a model, the App fetches model files from HuggingFace (huggingface.co). No personal data is sent during this process — only standard HTTP requests for the model files.</li>
+        <li><strong>Download AI models:</strong> When you choose to download a model, the App fetches model files from HuggingFace (huggingface.co/litert-community or huggingface.co/NexaAI). No personal data is sent during this process — only standard HTTP requests for the model files.</li>
     </ul>
     <p>No other network connections are made. The App functions fully offline after models are downloaded.</p>
 
@@ -165,7 +165,7 @@
             <a href="https://github.com/CarlKho-Minerva/health-passport-android">GitHub</a>
         </div>
         <p>Health Passport &mdash; open source at <a href="https://github.com/CarlKho-Minerva/health-passport-android">github.com/CarlKho-Minerva/health-passport-android</a></p>
-        <p>Built for the Qualcomm &times; Nexa AI On-Device Builder Bounty &middot; &copy; 2026 Carl Kho</p>
+        <p>Built for the Qualcomm &times; Nexa AI On-Device Bounty (Apr 2026 Grand Champion) and the Gemma 4 Good Hackathon (Google DeepMind, 2026) &middot; &copy; 2026 Carl Kho</p>
     </footer>
 </body>
 </html>

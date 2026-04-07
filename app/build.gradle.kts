@@ -36,20 +36,28 @@ android {
         applicationId = "com.carlkho.healthpassport"
         minSdk = 27
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 5
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 enabled to generate mapping.txt (deobfuscation file for Play Console).
+            // -dontobfuscate in proguard-rules.pro ensures no renaming happens,
+            // so the app behaviour is identical to isMinifyEnabled=false.
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.getByName("release")
+            // Request symbol table from any project-compiled .so files (best-effort;
+            // Nexa SDK native libs are stripped by the SDK itself).
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
 
         debug {
@@ -140,6 +148,13 @@ dependencies {
     // Pinned to 0.0.24 (latest stable per docs.nexa.ai/en/nexa-sdk-android/quickstart)
     implementation("ai.nexa:core:0.0.24")
     // ===== NEXA CLOUD SDK END =====
+
+    // ===== GOOGLE AI EDGE — LiteRT-LM (Gemma 4) =====
+    // LiteRT-LM is Google's production-ready on-device LLM inference framework.
+    // Used to run Gemma 4 E2B (litert-community/gemma-4-E2B-it-litert-lm) on-device.
+    // For Gemma 4 Good Hackathon submission.
+    implementation(libs.litert.lm.android)
+    // ===== GOOGLE AI EDGE END =====
     implementation(project(":transform"))
     implementation(":okdownload-core@aar")
     implementation(":okdownload-sqlite@aar")

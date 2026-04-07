@@ -27,6 +27,9 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -91,6 +94,7 @@ import com.nexa.demo.utils.ExecShell
 import com.nexa.demo.utils.ImgUtil
 import com.nexa.demo.utils.WavRecorder
 import com.nexa.demo.utils.inflate
+import com.nexa.demo.engine.Gemma4Engine
 import com.nexa.sdk.AsrWrapper
 import com.nexa.sdk.CvWrapper
 import com.nexa.sdk.EmbedderWrapper
@@ -185,6 +189,9 @@ class MainActivity : FragmentActivity() {
     private lateinit var rerankerWrapper: RerankerWrapper
     private lateinit var cvWrapper: CvWrapper
     private lateinit var asrWrapper: AsrWrapper
+    // Google AI Edge — Gemma 4 E2B via LiteRT-LM
+    private var gemma4Engine: Gemma4Engine? = null
+    private var isLoadGemmaModel = false
     private val modelScope = CoroutineScope(Dispatchers.IO)
 
     private val chatList = arrayListOf<ChatMessage>()
@@ -313,11 +320,7 @@ class MainActivity : FragmentActivity() {
             btnAskDoctor.performClick()
         }
         findViewById<View>(R.id.chip_record_visit).setOnClickListener {
-            if (isLoadAsrModel) {
-                startRecord()
-            } else {
-                Toast.makeText(this, "Voice model loading... please wait", Toast.LENGTH_SHORT).show()
-            }
+            showAudioChoiceSheet()
         }
         findViewById<View>(R.id.chip_organize_records).setOnClickListener {
             runInboxHousekeeping()
@@ -338,7 +341,7 @@ class MainActivity : FragmentActivity() {
         }
 
         // Set initial status - demo-friendly
-        tvModelStatus.text = "Qualcomm NPU · Health Vault Loaded"
+        tvModelStatus.text = "On-device AI · Health Vault Ready"
 
         bottomPanel = findViewById(R.id.bottom_panel)
         btnAudioCancel = findViewById(R.id.btn_audio_cancel)
@@ -625,10 +628,12 @@ Answer based on the health records above. If the records don't contain relevant 
      * Show intro modal on launch (unless user has dismissed it)
      */
     // Essential models for the core pipeline (LLM + OCR + ASR)
+    // Gemma 4 E2B (Google AI Edge LiteRT-LM) is preferred as primary LLM.
+    // Falls back to Qwen3-4B-NPU if Gemma 4 file has not been downloaded yet.
     private val essentialModelIds = listOf(
-        "Qwen3-4B-Instruct-NPU",   // Brain — text Q&A
-        "paddleocr-npu",            // Scanner — document OCR
-        "parakeet-tdt-npu"          // Voice — speech-to-text
+        "gemma4-e2b",          // Brain — Gemma 4 E2B via LiteRT-LM (Google AI Edge)
+        "paddleocr-npu",       // Scanner — document OCR
+        "parakeet-tdt-npu"     // Voice — speech-to-text
     )
 
     private fun checkFirstLaunch() {
@@ -660,9 +665,11 @@ Answer based on the health records above. If the records don't contain relevant 
             }
         }
 
-        // Load LLM first (most important)
-        val llmModel = modelList.firstOrNull { it.id == "Qwen3-4B-Instruct-NPU" }
-        if (llmModel != null && !isLoadLlmModel && isModelDownloaded(llmModel) == null) {
+        // Load primary LLM first (most important).
+        // Prefer Gemma 4 E2B; fall back to Qwen3-4B-NPU for NPU-only devices.
+        val llmModel = modelList.firstOrNull { it.id == "gemma4-e2b" }
+            ?: modelList.firstOrNull { it.id == "Qwen3-4B-Instruct-NPU" }
+        if (llmModel != null && !isLoadLlmModel && !isLoadGemmaModel && isModelDownloaded(llmModel) == null) {
             selectModelId = llmModel.id
             val pos = modelList.indexOfFirst { it.id == selectModelId }
             if (pos >= 0) spModelList.setSelection(pos)
@@ -1065,7 +1072,7 @@ ___
                     }
                 } catch (_: Exception) {}
             }
-            overviewBuilder.append("___\n\n*All data stored on-device · HIPAA-compliant*")
+            overviewBuilder.append("___\n\n*All data stored on your device · Never uploaded*")
             streamResponseToChat(overviewBuilder.toString())
             return true
         }
@@ -1116,14 +1123,15 @@ You have direct access to the patient's health records stored locally, including
 - Scanned documents (OCR extractions)
 
 Core directives:
-1. ALWAYS reference the patient's health records when answering. Cite specific data (dates, values, meds) from the records.
-2. Be precise and evidence-based. Specify dosage, frequency, and mechanism when discussing medications.
-3. If records contain relevant data, analyze and synthesize across systems (e.g., medication interactions, timeline patterns).
-4. If records don't cover the topic, say "Your health vault doesn't have records about this yet — would you like to save this to the vault?"
-5. When analyzing scanned documents: identify document type, key findings, medications, and action items.
-6. Keep responses concise. Use bold for emphasis. No unnecessary fluff.
-7. The patient travels internationally — factor in medication availability and regional healthcare context when relevant.
-8. After answering, if there is relevant follow-up to explore, end with a brief one-line suggestion. Example: "Want me to cross-check this with your active medications?" or "Should I look at your timeline for related visits?"
+1. If the patient says "hi", "hello", or a greeting, respond warmly and briefly: "Hello! How can I help with your health records today?" Do NOT dump data unprompted.
+2. ONLY reference specific records when the patient asks a question. Cite specific data (dates, values, meds) from the records.
+3. Be precise and evidence-based. Specify dosage, frequency, and mechanism when discussing medications.
+4. If records contain relevant data, analyze and synthesize across systems (e.g., medication interactions, timeline patterns).
+5. If records don't cover the topic, say "Your health vault doesn't have records about this yet — would you like to save this to the vault?"
+6. When analyzing scanned documents: identify document type, key findings, medications, and action items.
+7. Keep responses concise. Use bold for emphasis. No unnecessary fluff.
+8. The patient travels internationally — factor in medication availability and regional healthcare context when relevant.
+9. After answering, end with a brief one-line suggestion. Example: "Want me to cross-check this with your active medications?" or "Should I look at your timeline for related visits?"
 
 You are a clinical tool, not a replacement for in-person care. Flag when something needs urgent professional attention.
 """
@@ -1376,20 +1384,16 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
             // Build multi-model status showing ALL loaded models
             val loadedParts = mutableListOf<String>()
-            if (isLoadLlmModel) {
-                val llmName = modelList.firstOrNull { it.id == selectModelId && (it.type == "chat" || it.type == "llm") }?.displayName
-                loadedParts.add("LLM: ${llmName ?: "loaded"}")
-            }
-            if (isLoadCVModel) loadedParts.add("OCR")
-            if (isLoadVlmModel) loadedParts.add("VLM")
-            if (isLoadEmbedderModel) loadedParts.add("EMB")
-            if (isLoadAsrModel) loadedParts.add("ASR")
-            if (isLoadRerankerModel) loadedParts.add("RNK")
+            if (isLoadLlmModel) loadedParts.add("\uD83E\uDDE0 Doctor")
+            if (isLoadCVModel) loadedParts.add("\uD83D\uDCF7 Scanner")
+            if (isLoadVlmModel) loadedParts.add("\uD83D\uDC41\uFE0F Vision")
+            if (isLoadEmbedderModel) loadedParts.add("\uD83D\uDD0D Search")
+            if (isLoadAsrModel) loadedParts.add("\uD83C\uDFA4 Voice")
+            if (isLoadRerankerModel) loadedParts.add("\uD83D\uDCCA Ranking")
             tvModelStatus.text = if (loadedParts.isNotEmpty()) {
-                loadedParts.joinToString(" + ") + " · Ready"
+                loadedParts.joinToString(" · ") + " · Ready"
             } else {
-                val modelData = modelList.firstOrNull { it.id == selectModelId }
-                "${modelData?.displayName ?: selectModelId} · Ready"
+                "On-device AI · Ready"
             }
 
             // Scan button always visible — routes to OCR/VLM if loaded, else guidance
@@ -1407,7 +1411,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             vTip.visibility = View.GONE
 
             // Update status
-            tvModelStatus.text = "Load failed - Try manual model or check logs"
+            tvModelStatus.text = "Setup failed — try restarting the app"
 
             // Only check model list if using list-based loading (not manual)
             if (selectModelId.isNotEmpty()) {
@@ -1500,7 +1504,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             resetLoadState()
 
             runOnUiThread {
-                tvModelStatus.text = "Loading model..."
+                tvModelStatus.text = "Preparing AI…"
             }
 
             // Guard: warn if not Snapdragon and trying NPU/cpu_gpu plugins
@@ -1509,7 +1513,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 runOnUiThread {
                     Toast.makeText(
                         this@MainActivity,
-                        "Non-Snapdragon device. NPU/GPU plugins may fail. Use QDC or mock mode.",
+                        "This device may not support hardware acceleration. Performance may vary.",
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -1565,7 +1569,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             ).build().onSuccess { wrapper ->
                 isLoadLlmModel = true
                 llmWrapper = wrapper
-                onLoadModelSuccess("LLM loaded: ${modelFile.name}")
+                onLoadModelSuccess("Doctor AI ready")
                 Log.d(TAG, "Manual LLM model loaded successfully")
             }.onFailure { error ->
                 Log.e(TAG, "Manual LLM load failed: ${error.message}")
@@ -1627,7 +1631,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 .build().onSuccess {
                     isLoadVlmModel = true
                     vlmWrapper = it
-                    onLoadModelSuccess("VLM loaded: ${modelFile.name}")
+                    onLoadModelSuccess("Vision AI ready")
                     Log.d(TAG, "Manual VLM model loaded successfully")
                 }.onFailure { error ->
                     Log.e(TAG, "Manual VLM load failed: ${error.message}")
@@ -1651,7 +1655,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     ).build().onSuccess { wrapper ->
                         isLoadLlmModel = true
                         llmWrapper = wrapper
-                        onLoadModelSuccess("Loaded as LLM (VLM failed): ${modelFile.name}")
+                        onLoadModelSuccess("Doctor AI ready (vision unavailable)")
                     }.onFailure { llmError ->
                         Log.e(TAG, "Both VLM and LLM load failed: ${llmError.message}")
                         onLoadModelFailed("VLM: ${error.message}\nLLM fallback: ${llmError.message}")
@@ -1689,6 +1693,11 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     if (isLoadRerankerModel) { try { rerankerWrapper.destroy() } catch (_: Exception) {} }
                     isLoadRerankerModel = false
                 }
+                "litert-lm" -> {
+                    // Gemma 4 E2B via Google AI Edge LiteRT-LM
+                    if (isLoadGemmaModel) { try { gemma4Engine?.close(); gemma4Engine = null } catch (_: Exception) {} }
+                    isLoadGemmaModel = false
+                }
             }
             val nexaManifestBean = selectModelData.getNexaManifest(this@MainActivity)
             val pluginId = nexaManifestBean?.PluginId ?: modelDataPluginId
@@ -1720,7 +1729,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     ).build().onSuccess { wrapper ->
                         isLoadLlmModel = true
                         llmWrapper = wrapper
-                        onLoadModelSuccess("llm model loaded")
+                        onLoadModelSuccess("Doctor AI ready")
                     }.onFailure { error ->
                         onLoadModelFailed(error.message.toString())
                     }
@@ -1749,7 +1758,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         .build().onSuccess { wrapper ->
                             isLoadEmbedderModel = true
                             embedderWrapper = wrapper
-                            onLoadModelSuccess("embedder model loaded")
+                            onLoadModelSuccess("Search engine ready")
                         }.onFailure { error ->
                             onLoadModelFailed(error.message.toString())
                         }
@@ -1778,7 +1787,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         .build().onSuccess { wrapper ->
                             isLoadRerankerModel = true
                             rerankerWrapper = wrapper
-                            onLoadModelSuccess("reranker model loaded")
+                            onLoadModelSuccess("Ranking model ready")
                         }.onFailure { error ->
                             onLoadModelFailed(error.message.toString())
                         }
@@ -1804,7 +1813,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         .build().onSuccess {
                             isLoadCVModel = true
                             cvWrapper = it
-                            onLoadModelSuccess("paddleocr model loaded")
+                            onLoadModelSuccess("Document scanner ready")
                         }.onFailure { error ->
                             onLoadModelFailed(error.message.toString())
                         }
@@ -1870,7 +1879,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         .build().onSuccess {
                             isLoadVlmModel = true
                             vlmWrapper = it
-                            onLoadModelSuccess("vlm model loaded")
+                            onLoadModelSuccess("Vision AI ready")
                         }.onFailure { error ->
                             onLoadModelFailed(error.message.toString())
                         }
@@ -1878,6 +1887,25 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
                 else -> {
                     onLoadModelFailed("model type error")
+                }
+
+                "litert-lm" -> {
+                    // Gemma 4 E2B via Google AI Edge LiteRT-LM
+                    // The model file is downloaded as a single .litertlm file.
+                    val gemmaModelPath = safeModelPath
+                    val gemmaCacheDir = cacheDir.absolutePath
+                    try {
+                        val eng = Gemma4Engine(
+                            modelPath = gemmaModelPath,
+                            cacheDir = gemmaCacheDir,
+                        )
+                        eng.initialize()
+                        gemma4Engine = eng
+                        isLoadGemmaModel = true
+                        onLoadModelSuccess("Gemma 4 E2B ready · Google AI Edge")
+                    } catch (e: Exception) {
+                        onLoadModelFailed("Gemma 4 init failed: ${e.message}")
+                    }
                 }
             }
         }
@@ -2457,7 +2485,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
         }
 
         btnAudioRecord.setOnClickListener {
-            startRecord()
+            showAudioChoiceSheet()
         }
 
         // Save to Vault — routes input through LLM with HK (housekeeping) system prompt
@@ -2491,11 +2519,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             browseHealthFiles()
         }
         findViewById<Button>(R.id.btn_voice_quick).setOnClickListener {
-            if (isLoadAsrModel) {
-                startRecord()
-            } else {
-                Toast.makeText(this, "Voice model loading... please wait", Toast.LENGTH_SHORT).show()
-            }
+            showAudioChoiceSheet()
         }
 
         /**
@@ -2652,7 +2676,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                 // Snapdragon with NPU support — skip dialog, load directly with NPU
                 modelDataPluginId = "npu"
                 Log.d(TAG, "Snapdragon detected, auto-selecting NPU for ${selectModelData.id}")
-                Toast.makeText(this@MainActivity, "Loading with NPU (Snapdragon detected)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Optimizing for your device…", Toast.LENGTH_SHORT).show()
                 loadModel(selectModelData, modelDataPluginId, 0)
             } else if (supportPluginIds.size > 1) {
                 val dialogBinding = DialogSelectPluginIdBinding.inflate(layoutInflater)
@@ -2781,7 +2805,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                         imm.hideSoftInputFromWindow(etInput.windowToken, 0)
                         if (!handlePreloadedQuery(inputString)) {
-                            streamResponseToChat("I can look up your **eyes**, **medications**, **timeline**, or give a **health summary**.\n\n*Load a model for free-form responses.*")
+                            streamResponseToChat("I can look up your **eyes**, **medications**, **timeline**, or give a **health summary**.\n\n*Loading AI for detailed conversations…*")
                         }
                     } else {
                         Toast.makeText(this@MainActivity, "Ask about your health records", Toast.LENGTH_SHORT).show()
@@ -2834,11 +2858,11 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         .onSuccess { transcription ->
                             val transcript = transcription.result.transcript ?: ""
                             runOnUiThread {
-                                messages.add(Message("**Transcription (ASR)**\n\n$transcript\n\n*on-device speech recognition*", MessageType.ASSISTANT))
+                                messages.add(Message("**\uD83C\uDFA4 Voice Note Transcribed**\n\n$transcript\n\n*Processed privately on your device*", MessageType.ASSISTANT))
                                 reloadRecycleView()
                             }
                             // If LLM also loaded, auto-analyze the transcript
-                            if (isLoadLlmModel && transcript.isNotBlank()) {
+                            if ((isLoadGemmaModel || isLoadLlmModel) && transcript.isNotBlank()) {
                                 // Auto-save raw transcript before analysis
                                 val record = "## Audio Transcription\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$transcript"
                                 saveHealthRecord(record)
@@ -2846,16 +2870,43 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                                 val asrQuery = "Analyze this transcribed note: $transcript"
                                 val ragPrompt = buildRagPrompt(asrQuery)
                                 chatList.add(ChatMessage(role = "user", asrQuery))
-                                val ragChatList = chatList.dropLast(1).toMutableList()
-                                ragChatList.add(ChatMessage("user", ragPrompt))
-                                llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
-                                    .onSuccess { templateOutput ->
-                                        val asrSb = StringBuilder()
-                                        llmWrapper.generateStreamFlow(
-                                            templateOutput.formattedText,
-                                            GenerationConfigSample().toGenerationConfig(null)
-                                        ).collect { handleResult(asrSb, it) }
+                                if (isLoadGemmaModel) {
+                                    runOnUiThread {
+                                        messages.add(Message("", MessageType.ASSISTANT))
+                                        reloadRecycleView()
                                     }
+                                    val asrSb = StringBuilder()
+                                    gemma4Engine!!.sendMessageStream(ragPrompt)
+                                        .collect { token ->
+                                            asrSb.append(token)
+                                            runOnUiThread {
+                                                val size = messages.size
+                                                if (size > 0 && messages.last().type == MessageType.ASSISTANT) {
+                                                    messages[size - 1] = Message(asrSb.toString(), MessageType.ASSISTANT)
+                                                    adapter.notifyItemChanged(size - 1)
+                                                    recyclerView.scrollToPosition(size - 1)
+                                                }
+                                            }
+                                        }
+                                    val clean = asrSb.toString().replace(thinkTagRegex, "").trimStart('\n', ' ')
+                                    chatList.add(ChatMessage("assistant", clean))
+                                    runOnUiThread {
+                                        val size = messages.size
+                                        if (size > 0) messages[size - 1] = Message(clean, MessageType.ASSISTANT)
+                                        reloadRecycleView()
+                                    }
+                                } else {
+                                    val ragChatList = chatList.dropLast(1).toMutableList()
+                                    ragChatList.add(ChatMessage("user", ragPrompt))
+                                    llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
+                                        .onSuccess { templateOutput ->
+                                            val asrSb = StringBuilder()
+                                            llmWrapper.generateStreamFlow(
+                                                templateOutput.formattedText,
+                                                GenerationConfigSample().toGenerationConfig(null)
+                                            ).collect { handleResult(asrSb, it) }
+                                        }
+                                }
                             } else if (transcript.isNotBlank()) {
                                 // ASR only, no LLM — auto-save and hint user
                                 val record = "## Audio Transcription\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$transcript"
@@ -2882,25 +2933,32 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         val imagesCopy = savedImageFiles.toList()
                         clearImages()
                         cvWrapper.infer(imagePath).onSuccess { results ->
-                            val ocrLines = results.map { it.text }.toList()
+                            val ocrLines = results.mapNotNull { it.text }.toList()
                             val fullText = ocrLines.joinToString(separator = "\n")
                             runOnUiThread {
-                                val content = "**OCR Extraction (PaddleOCR)**\n\n```\n$fullText\n```\n\n*${ocrLines.size} text regions detected*"
+                                // Show clean status instead of raw OCR dump
+                                val hasGarbage = fullText.matches(Regex(".*[^\\x20-\\x7E\\n]{5,}.*")) ||
+                                    ocrLines.count { it.length < 3 } > ocrLines.size / 2
+                                val content = if (hasGarbage && ocrLines.size < 5) {
+                                    "**\u26A0\uFE0F Low Quality Scan**\n\nThe document couldn't be read clearly. Try:\n- Better lighting\n- Flatten the document\n- Hold camera steady\n\n<details><summary>View raw scan data</summary>\n\n```\n$fullText\n```\n</details>"
+                                } else {
+                                    "**\uD83D\uDCC4 Document Scanned** — ${ocrLines.size} text regions found\n\n<details><summary>View extracted text</summary>\n\n```\n$fullText\n```\n</details>"
+                                }
                                 messages.add(Message(content, MessageType.ASSISTANT))
                                 reloadRecycleView()
                             }
                             // Auto-save to health vault
                             if (fullText.isNotBlank()) {
-                                val record = "## OCR Extraction\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$fullText"
+                                val record = "## Document Scan\n**Date:** ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").format(java.util.Date())}\n\n$fullText"
                                 saveHealthRecord(record)
                             }
                             // ── OCR → LLM pipeline: if LLM is also loaded, auto-analyze ──
                             if (isLoadLlmModel && fullText.isNotBlank()) {
                                 runOnUiThread {
-                                    messages.add(Message("*Analyzing with LLM...*", MessageType.ASSISTANT))
+                                    messages.add(Message("*Analyzing document...*", MessageType.ASSISTANT))
                                     reloadRecycleView()
                                 }
-                                val analysisPrompt = "Analyze this medical document extracted via OCR. Identify document type, key findings, medications, and action items:\n\n$fullText"
+                                val analysisPrompt = "Analyze this medical document extracted via OCR. Identify: document type, date (if present), key findings, medications, and action items. If the document date is more than 2 years old, label it as '📋 Historical Record' at the top. If the text appears garbled or corrupted, say so and suggest retaking the photo. Today's date is ${java.text.SimpleDateFormat("yyyy-MM-dd").format(java.util.Date())}:\n\n$fullText"
                                 val ragPrompt = buildRagPrompt(analysisPrompt)
                                 chatList.add(ChatMessage(role = "user", analysisPrompt))
                                 val ragChatList = chatList.dropLast(1).toMutableList()
@@ -2914,7 +2972,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                                         ).collect { handleResult(ocrSb, it) }
                                     }.onFailure { error ->
                                         runOnUiThread {
-                                            messages.add(Message("LLM analysis error: ${error.message}", MessageType.PROFILE))
+                                            messages.add(Message("Analysis failed — the AI couldn't process this. Try again.", MessageType.PROFILE))
                                             reloadRecycleView()
                                         }
                                     }
@@ -2973,7 +3031,7 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         runOnUiThread {
                             streamResponseToChat(
                                 "**No image model available.**\n\n" +
-                                "Download **PaddleOCR** (documents) or **OmniNeural VLM** (photos/X-rays) from the model picker."
+                                "The **Document Scanner** and **Vision AI** are still downloading. Once ready, scan will work automatically."
                             )
                         }
                     }
@@ -2982,25 +3040,64 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
 
                 // ── TEXT-ONLY PATH ──
                 // Priority 1: LLM with RAG (the "brain")
-                if (isLoadLlmModel) {
+                // Gemma 4 E2B (LiteRT-LM) is preferred when loaded; Nexa LlmWrapper is fallback.
+                if (isLoadGemmaModel || isLoadLlmModel) {
                     val ragPrompt = buildRagPrompt(inputString)
                     Log.d(TAG, "RAG prompt (${ragPrompt.length} chars): ${ragPrompt.take(200)}...")
                     // Store bare query in history — vault context stays out of chatList
                     // so it's re-fetched fresh each call and doesn't bloat context window
                     chatList.add(ChatMessage(role = "user", inputString))
-                    val ragChatList = chatList.dropLast(1).toMutableList()
-                    ragChatList.add(ChatMessage("user", ragPrompt))
-                    llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
-                        .onSuccess { templateOutput ->
-                            llmWrapper.generateStreamFlow(
-                                templateOutput.formattedText,
-                                GenerationConfigSample().toGenerationConfig(null)
-                            ).collect { handleResult(sb, it) }
-                        }.onFailure { error ->
-                            runOnUiThread {
-                                Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_SHORT).show()
-                            }
+
+                    if (isLoadGemmaModel) {
+                        // ── Gemma 4 E2B via Google AI Edge LiteRT-LM ──
+                        runOnUiThread {
+                            messages.add(Message("", MessageType.ASSISTANT))
+                            reloadRecycleView()
                         }
+                        gemma4Engine!!.sendMessageStream(ragPrompt)
+                            .catch { error ->
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .collect { token ->
+                                sb.append(token)
+                                runOnUiThread {
+                                    val size = messages.size
+                                    if (size > 0 && messages.last().type == MessageType.ASSISTANT) {
+                                        messages[size - 1] = Message(sb.toString(), MessageType.ASSISTANT)
+                                        adapter.notifyItemChanged(size - 1)
+                                        recyclerView.scrollToPosition(size - 1)
+                                    }
+                                }
+                            }
+                        // Finalise: strip think tags, persist to chat history
+                        val cleanContent = sb.toString()
+                            .replace(thinkTagRegex, "")
+                            .replace(openThinkTagRegex, "")
+                            .trimStart('\n', ' ')
+                        chatList.add(ChatMessage("assistant", cleanContent))
+                        runOnUiThread {
+                            val size = messages.size
+                            if (size > 0) messages[size - 1] = Message(cleanContent, MessageType.ASSISTANT)
+                            reloadRecycleView()
+                        }
+                    } else {
+                        // ── Nexa SDK LlmWrapper fallback ──
+                        val ragChatList = chatList.dropLast(1).toMutableList()
+                        ragChatList.add(ChatMessage("user", ragPrompt))
+                        llmWrapper.applyChatTemplate(ragChatList.toTypedArray(), null, enableThinking)
+                            .onSuccess { templateOutput ->
+                                llmWrapper.generateStreamFlow(
+                                    templateOutput.formattedText,
+                                    GenerationConfigSample().toGenerationConfig(null)
+                                ).collect { handleResult(sb, it) }
+                            }.onFailure { error ->
+                                runOnUiThread {
+                                    Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                    }
                     clearImages()
                     return@launch
                 }
@@ -3366,6 +3463,20 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             startActivityForResult(
                 Intent.createChooser(intent, "Select GGUF Model File"),
                 REQUEST_CODE_MODEL_FILE
+            )
+        } catch (ex: android.content.ActivityNotFoundException) {
+            Toast.makeText(this, "Please install a file manager.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openAudioFilePicker() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.type = "audio/*"
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        try {
+            startActivityForResult(
+                Intent.createChooser(intent, "Select Audio File"),
+                REQUEST_CODE_AUDIO_FILE
             )
         } catch (ex: android.content.ActivityNotFoundException) {
             Toast.makeText(this, "Please install a file manager.", Toast.LENGTH_SHORT).show()
@@ -3761,8 +3872,8 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             runOnUiThread {
                 Toast.makeText(
                     this,
-                    "Saved to vault",
-                    Toast.LENGTH_SHORT
+                    "\u2705 Saved → 00_Inbox/$fileName",
+                    Toast.LENGTH_LONG
                 ).show()
             }
         } catch (e: Exception) {
@@ -3847,6 +3958,14 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             return
         }
 
+        // Handle audio file import
+        if (requestCode == REQUEST_CODE_AUDIO_FILE) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                data.data?.let { uri -> importAudioFile(uri) }
+            }
+            return
+        }
+
         var bitmap: Bitmap? = null
         if (requestCode == 1) {
             if (resultCode == Activity.RESULT_OK && data != null) {
@@ -3918,6 +4037,169 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
         refreshTopScrollContainer()
     }
 
+    /**
+     * Handles a URI picked from the audio file picker.
+     * Converts any supported audio format (MP3, M4A, AAC, etc.) to 16 kHz mono WAV
+     * on a background thread, then sets audioFile so the user can tap Send to transcribe.
+     */
+    private fun importAudioFile(uri: Uri) {
+        Toast.makeText(this, "Importing audio...", Toast.LENGTH_SHORT).show()
+        modelScope.launch {
+            try {
+                val audioDir = File(filesDir, "audio").apply { if (!exists()) mkdirs() }
+                val outputFile = File(audioDir, "imported_${System.currentTimeMillis()}.wav")
+                val success = convertAudioToWav(uri, outputFile)
+                runOnUiThread {
+                    if (success && outputFile.exists() && outputFile.length() > 44) {
+                        audioFile = outputFile
+                        refreshTopScrollContainer()
+                        Toast.makeText(this@MainActivity, "Audio imported — tap Send to transcribe", Toast.LENGTH_SHORT).show()
+                    } else {
+                        outputFile.delete()
+                        Toast.makeText(this@MainActivity, "Could not import audio file", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "importAudioFile error", e)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Decodes any Android-supported audio format to PCM, mixes to mono,
+     * resamples to 16 kHz, and writes a standard WAV file.
+     */
+    private fun convertAudioToWav(uri: Uri, outputFile: File): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(this, uri, null)
+
+            var audioTrackIndex = -1
+            var inputFormat: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val fmt = extractor.getTrackFormat(i)
+                if (fmt.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    audioTrackIndex = i
+                    inputFormat = fmt
+                    break
+                }
+            }
+            if (audioTrackIndex < 0 || inputFormat == null) return false
+
+            extractor.selectTrack(audioTrackIndex)
+            val mime = inputFormat.getString(MediaFormat.KEY_MIME)!!
+            val srcSampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val srcChannels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val targetSampleRate = 16000
+
+            val codec = MediaCodec.createDecoderByType(mime)
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
+
+            val allPcm = mutableListOf<Short>()
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inIdx = codec.dequeueInputBuffer(10_000L)
+                    if (inIdx >= 0) {
+                        val buf = codec.getInputBuffer(inIdx)!!
+                        val size = extractor.readSampleData(buf, 0)
+                        if (size < 0) {
+                            codec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            codec.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val outIdx = codec.dequeueOutputBuffer(bufferInfo, 10_000L)
+                if (outIdx >= 0) {
+                    val buf = codec.getOutputBuffer(outIdx)!!
+                    val shorts = ShortArray(bufferInfo.size / 2)
+                    buf.order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
+                    allPcm.addAll(shorts.asList())
+                    codec.releaseOutputBuffer(outIdx, false)
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        outputDone = true
+                    }
+                }
+            }
+            codec.stop()
+            codec.release()
+            extractor.release()
+
+            // Mix down to mono
+            val mono: ShortArray = if (srcChannels == 1) {
+                allPcm.toShortArray()
+            } else {
+                ShortArray(allPcm.size / srcChannels) { i ->
+                    var sum = 0L
+                    for (ch in 0 until srcChannels) sum += allPcm[i * srcChannels + ch]
+                    (sum / srcChannels).toShort()
+                }
+            }
+
+            // Resample to 16 kHz using linear interpolation
+            val resampled: ShortArray = if (srcSampleRate == targetSampleRate) {
+                mono
+            } else {
+                val ratio = srcSampleRate.toDouble() / targetSampleRate.toDouble()
+                val outLen = (mono.size / ratio).toInt()
+                ShortArray(outLen) { i ->
+                    val pos = i * ratio
+                    val idx = pos.toInt().coerceAtMost(mono.size - 2)
+                    val frac = pos - idx
+                    ((mono[idx] * (1.0 - frac)) + (mono[idx + 1] * frac)).toInt().toShort()
+                }
+            }
+
+            // Write WAV file
+            val dataSize = resampled.size * 2
+            FileOutputStream(outputFile).use { fos ->
+                fos.write("RIFF".toByteArray())
+                fos.write(wavIntToLe(dataSize + 36))
+                fos.write("WAVE".toByteArray())
+                fos.write("fmt ".toByteArray())
+                fos.write(wavIntToLe(16))
+                fos.write(wavShortToLe(1))          // PCM
+                fos.write(wavShortToLe(1))          // mono
+                fos.write(wavIntToLe(targetSampleRate))
+                fos.write(wavIntToLe(targetSampleRate * 2)) // byteRate
+                fos.write(wavShortToLe(2))          // blockAlign
+                fos.write(wavShortToLe(16))         // bitsPerSample
+                fos.write("data".toByteArray())
+                fos.write(wavIntToLe(dataSize))
+                val pcmBytes = ByteArray(dataSize)
+                for (i in resampled.indices) {
+                    pcmBytes[i * 2] = (resampled[i].toInt() and 0xFF).toByte()
+                    pcmBytes[i * 2 + 1] = (resampled[i].toInt() shr 8 and 0xFF).toByte()
+                }
+                fos.write(pcmBytes)
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "convertAudioToWav failed", e)
+            try { extractor.release() } catch (_: Exception) {}
+            false
+        }
+    }
+
+    private fun wavIntToLe(v: Int): ByteArray = byteArrayOf(
+        (v and 0xFF).toByte(), (v shr 8 and 0xFF).toByte(),
+        (v shr 16 and 0xFF).toByte(), (v shr 24 and 0xFF).toByte()
+    )
+
+    private fun wavShortToLe(v: Int): ByteArray = byteArrayOf(
+        (v and 0xFF).toByte(), (v shr 8 and 0xFF).toByte()
+    )
+
     private fun startRecord() {
         bottomPanel.visibility = View.VISIBLE
 
@@ -3952,6 +4234,78 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
         audioFile = null
         clearImages()
         reloadRecycleView()
+    }
+
+    /**
+     * Shows a bottom sheet: "Record Now" or "Import Audio File".
+     * All mic/voice buttons funnel through this.
+     */
+    private fun showAudioChoiceSheet() {
+        if (!isLoadAsrModel) {
+            Toast.makeText(this, "Voice model loading\u2026 please wait", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sheet = BottomSheetDialog(this, R.style.DarkBottomSheetDialog)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0D0D0D"))
+            setPadding(dp(20), dp(20), dp(20), dp(24))
+        }
+
+        val header = TextView(this).apply {
+            text = "VOICE INPUT"
+            setTextColor(Color.parseColor("#4D4D4D"))
+            textSize = 10f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            letterSpacing = 0.08f
+            isAllCaps = true
+            setPadding(0, 0, 0, dp(16))
+        }
+        container.addView(header)
+
+        val btnRecord = TextView(this).apply {
+            text = "\uD83C\uDFA4  Record Now"
+            setTextColor(Color.parseColor("#F2F2F2"))
+            textSize = 15f
+            setPadding(0, dp(14), 0, dp(14))
+            isClickable = true
+            isFocusable = true
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                sheet.dismiss()
+                startRecord()
+            }
+        }
+        container.addView(btnRecord)
+
+        val sep = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+            setBackgroundColor(Color.parseColor("#1A1A1A"))
+        }
+        container.addView(sep)
+
+        val btnImport = TextView(this).apply {
+            text = "\uD83D\uDCC1  Import Audio File"
+            setTextColor(Color.parseColor("#F2F2F2"))
+            textSize = 15f
+            setPadding(0, dp(14), 0, dp(14))
+            isClickable = true
+            isFocusable = true
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                sheet.dismiss()
+                openAudioFilePicker()
+            }
+        }
+        container.addView(btnImport)
+
+        sheet.setContentView(container)
+        sheet.window?.navigationBarColor = Color.parseColor("#0D0D0D")
+        sheet.setOnShowListener {
+            val bs = sheet.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
+            bs?.setBackgroundColor(Color.parseColor("#0D0D0D"))
+        }
+        sheet.show()
     }
 
     private var popupWindow: PopupWindow? = null
@@ -4017,6 +4371,35 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
             }
         }
         container.addView(btnGallery)
+
+        // Separator
+        val sep2 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+            setBackgroundColor(Color.parseColor("#0F0F0F"))
+        }
+        container.addView(sep2)
+
+        // Import Audio button
+        val btnImportAudio = TextView(this).apply {
+            text = "Import Audio File"
+            setTextColor(Color.parseColor("#F2F2F2"))
+            textSize = 15f
+            typeface = android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+            setPadding(0, dp(14), 0, dp(14))
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                sheet.dismiss()
+                if (isLoadAsrModel) {
+                    openAudioFilePicker()
+                } else {
+                    Toast.makeText(this@MainActivity, "Voice model loading… please wait", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        container.addView(btnImportAudio)
 
         sheet.setContentView(container)
         sheet.window?.navigationBarColor = Color.parseColor("#0D0D0D")
@@ -4136,18 +4519,22 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
      */
     private fun runInboxHousekeeping() {
         val inboxDir = File(healthVaultDir, "00_Inbox")
+        Log.d(TAG, "HK: inboxDir=${inboxDir.absolutePath} exists=${inboxDir.exists()}")
         if (!inboxDir.exists() || inboxDir.listFiles()?.isEmpty() != false) {
+            Log.d(TAG, "HK: Inbox empty or missing")
             Toast.makeText(this, "Inbox is empty — nothing to organize", Toast.LENGTH_SHORT).show()
             return
         }
 
         val inboxFiles = inboxDir.listFiles()?.filter { it.isFile && it.extension == "md" } ?: emptyList()
+        Log.d(TAG, "HK: Found ${inboxFiles.size} .md files: ${inboxFiles.map { it.name }}")
         if (inboxFiles.isEmpty()) {
             Toast.makeText(this, "No records in inbox to organize", Toast.LENGTH_SHORT).show()
             return
         }
 
         if (!isLoadLlmModel) {
+            Log.d(TAG, "HK: LLM not loaded, aborting")
             Toast.makeText(this, "Load a text model first to organize records", Toast.LENGTH_SHORT).show()
             return
         }
@@ -4182,7 +4569,11 @@ ENTITIES: [key medical entities — drug names, dosages, test values, diagnoses,
 If the data contains MULTIPLE categories, list them comma-separated in CATEGORY.
 If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
 
-                val stage1Result = llmCallSilent(classifyPrompt, content) ?: continue
+                val stage1Result = llmCallSilent(classifyPrompt, content) ?: run {
+                    Log.w(TAG, "HK: LLM classify returned null for ${file.name}")
+                    continue
+                }
+                Log.d(TAG, "HK: classify result for ${file.name}: ${stage1Result.take(200)}")
 
                 val categoryLine = stage1Result.lines().firstOrNull {
                     it.trimStart().startsWith("CATEGORY:", ignoreCase = true)
@@ -4196,7 +4587,11 @@ If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
                     it.trimStart().startsWith("ENTITIES:", ignoreCase = true)
                 }?.substringAfter(":")?.trim() ?: ""
 
-                if (categoryLine.contains("not_medical")) continue
+                Log.d(TAG, "HK: category=$categoryLine summary=$summaryLine")
+                if (categoryLine.contains("not_medical")) {
+                    Log.d(TAG, "HK: Skipping ${file.name} — not_medical")
+                    continue
+                }
 
                 val categories = categoryLine.split(",").map { it.trim() }
                 val targetFiles = mutableMapOf<String, File>()
@@ -4211,7 +4606,11 @@ If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
                     targetFiles[timelineFile.relativeTo(healthVaultDir).path] = timelineFile
                 }
 
-                if (targetFiles.isEmpty()) continue
+                Log.d(TAG, "HK: ${file.name} → targets: ${targetFiles.keys}")
+                if (targetFiles.isEmpty()) {
+                    Log.w(TAG, "HK: No target files for ${file.name}, categories=$categories")
+                    continue
+                }
 
                 var fileFiled = false
                 for ((relPath, targetFile) in targetFiles) {
@@ -4248,11 +4647,14 @@ If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
 
                 if (fileFiled) {
                     filed++
-                    // Remove from inbox after successful filing
+                    Log.d(TAG, "HK: Filed ${file.name} → deleted from inbox")
                     file.delete()
+                } else {
+                    Log.w(TAG, "HK: ${file.name} classified but not filed")
                 }
             }
 
+            Log.d(TAG, "HK: Done — processed=$processed filed=$filed")
             val resultMsg = if (filed > 0) {
                 "Organized **$filed** record${if (filed != 1) "s" else ""} from inbox into vault files."
             } else if (processed > 0) {
@@ -4268,6 +4670,7 @@ If the data is NOT medically relevant at all, use: CATEGORY: not_medical"""
         private const val SP_DOWNLOADED = "sp_downloaded"
         private const val TAG = "HealthPassport"
         private const val REQUEST_CODE_MODEL_FILE = 2000
+        private const val REQUEST_CODE_AUDIO_FILE = 2002
 
         // Model types for the model_list.json "type" field
         const val MODEL_TYPE_LLM = "chat"

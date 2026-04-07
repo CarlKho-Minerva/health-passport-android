@@ -1,8 +1,11 @@
 # Health Passport
 
-> **Qualcomm x Nexa On-Device AI Bounty** · Snapdragon 8 Elite · Feb 2026
+> **Grand Champion — Qualcomm × Nexa AI On-Device Bounty ($6,500)** · Apr 2026  
+> **Gemma 4 Good Hackathon (Google DeepMind)** · May 2026
 
-Privacy-first medical records on your phone. Talk, scan, or type — six AI models run entirely on-device via NexaSDK on Qualcomm Hexagon NPU. No internet. No cloud. No HIPAA liability.
+Privacy-first medical records on your phone. Talk, scan, or type — AI models run entirely on-device. No internet. No cloud. No HIPAA liability.
+
+**v1.4 — Gemma 4 E2B (Google AI Edge LiteRT-LM)** is now the primary LLM, replacing Nexa SDK's Qwen3-4B for health Q&A and reasoning.
 
 [![Health Passport — GitHub Pages](docs/preview.png)](https://carlkho-minerva.github.io/health-passport-android/)
 
@@ -16,18 +19,18 @@ This affects 50M+ international travelers. Medical continuity breaks at every bo
 
 ## The Solution
 
-Six NPU-accelerated models running on Snapdragon 8 Elite, auto-downloaded on first launch:
+On-device AI pipeline, auto-downloaded on first launch:
 
-| Model | Role | Speed |
-|-------|------|-------|
-| **Qwen3-4B Instruct** | Brain — text Q&A | 19 tok/s decode, 1049 tok/s prefill |
-| **PaddleOCR** | Document scanner | < 1s per page |
-| **Parakeet ASR** | Speech-to-text | Real-time |
-| **OmniNeural-4B** | Vision analysis | ~15 tok/s |
-| **EmbedGemma** | Memory / embeddings | Instant |
-| **Llama-3.2-3B Turbo** | Alternate LLM | ~15 tok/s |
+| Model | Role | SDK | Size |
+|-------|------|-----|------|
+| **Gemma 4 E2B** | Primary LLM — health Q&A + grounded reasoning | Google AI Edge LiteRT-LM | ~2.6 GB |
+| **PaddleOCR** | Document scanner | Nexa SDK | ~100 MB |
+| **Parakeet ASR** | Speech-to-text | Nexa SDK | ~300 MB |
+| **EmbedGemma** | Memory / embeddings | Nexa SDK | ~300 MB |
+| **OmniNeural-4B** | Vision analysis (optional) | Nexa SDK | ~4 GB |
+| **Qwen3-4B NPU** | LLM fallback (NPU devices) | Nexa SDK | ~4 GB |
 
-First launch shows a setup modal that auto-downloads the three essential models (LLM + OCR + ASR). No model picker, no configuration — the app routes input to the right model automatically.
+First launch auto-downloads Gemma 4 E2B + PaddleOCR + Parakeet ASR. The smart router picks the right model automatically.
 
 ---
 
@@ -43,53 +46,50 @@ graph TB
     end
 
     subgraph ROUTER["Smart Pipeline Router"]
-        R1["text → RAG Lookup → LLM"]
-        R2["image → OCR → Save → LLM"]
-        R3["image → VLM → Analysis"]
-        R4["audio → ASR → RAG → LLM"]
+        R1["text → RAG Lookup → Gemma 4"]
+        R2["image → OCR → Save → Gemma 4"]
+        R3["audio → ASR → RAG → Gemma 4"]
     end
 
-    subgraph NPU["NPU Inference · Snapdragon 8 Elite"]
-        QWEN[Qwen3-4B<br/>LLM]
-        OCR[PaddleOCR<br/>OCR]
-        ASR[Parakeet<br/>ASR]
-        VLM[OmniNeural<br/>VLM]
-        EMB[EmbedGemma<br/>Embed]
+    subgraph INFERENCE["On-Device Inference"]
+        G4["Gemma 4 E2B\nLiteRT-LM · GPU/CPU"]
+        OCR["PaddleOCR\nNexa SDK · NPU"]
+        ASR["Parakeet ASR\nNexa SDK · NPU"]
+        EMB["EmbedGemma\nNexa SDK · NPU"]
     end
 
     subgraph STORAGE["Health Vault · On-Device"]
-        HV["health_vault/<br/>eyes.md, meds.md, ..."]
-        HR["health_records/<br/>scan_2026-02-15.md, ..."]
+        HV["health_vault/\neyes.md, meds.md, ..."]
+        HR["health_records/\nscan_2026-04-07.md, ..."]
     end
 
     TEXT --> R1
     CAM --> R2
-    CAM --> R3
-    MIC --> R4
-    R1 --> QWEN
+    MIC --> R3
+    R1 --> G4
     R2 --> OCR
-    R2 --> QWEN
-    R3 --> VLM
-    R4 --> ASR
-    R4 --> QWEN
-    QWEN --> STORAGE
+    R2 --> G4
+    R3 --> ASR
+    R3 --> G4
+    G4 --> STORAGE
     OCR --> STORAGE
-    STORAGE --> QWEN
+    STORAGE --> G4
+    EMB --> STORAGE
 ```
 
 ---
 
 ## What You Can Do
 
-**Conversational queries** — "What's my current eye prescription?", "List my active medications", "Show my February health timeline." Responses stream in real-time from your local Health Vault using RAG.
+**Conversational queries** — "What's my current eye prescription?", "List my active medications", "Show my February health timeline." Gemma 4 E2B answers from your local Health Vault using RAG.
 
-**Document scanning** — Point the camera at a prescription or lab report. PaddleOCR extracts the text, saves it to the vault, then the LLM analyzes it. One tap.
+**Document scanning** — Point the camera at a prescription or lab report. PaddleOCR extracts the text, saves it to the vault, then Gemma 4 analyzes it. One tap.
 
-**Voice input** — Speak naturally. Parakeet ASR transcribes, the app searches your vault, and the LLM answers. Same chat interface as text.
+**Voice input** — Speak naturally. Parakeet ASR transcribes, the app searches your vault, and Gemma 4 answers. Same chat interface as text.
 
-**Vision analysis** — Attach a photo and ask "what's in this image?" OmniNeural-4B describes what it sees.
+**Vault browsing** — Browse by body system, timeline, or protocol. Every file is markdown. Tap to view, edit, save.
 
-**Vault browsing** — Browse by body system, timeline, or protocol. Every file is markdown. Tap to view, edit, save. No proprietary formats.
+**Grounded answers** — Responses are built from your actual health records. Gemma 4 does not guess at medical facts outside your vault.
 
 ---
 
@@ -97,7 +97,8 @@ graph TB
 
 | Component | Details |
 |-----------|---------|
-| SDK | `ai.nexa:core:0.0.24` with NPU (273) + CPU/GPU (17) plugins |
+| Primary LLM | Gemma 4 E2B via `com.google.ai.edge.litertlm:litertlm-android:latest.release` |
+| LLM Fallback | Nexa SDK `ai.nexa:core:0.0.24` (Qwen3-4B NPU, Llama-3.2-3B) |
 | Language | Kotlin 1.9.22 |
 | Target | API 34 (min API 27) |
 | UI | Material Design 3, custom dark theme |

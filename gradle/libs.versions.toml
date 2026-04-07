@@ -25,6 +25,7 @@ gson = "2.10.1"
 glide = "5.0.5"
 activityVersion = "1.12.2"
 markwon = "4.6.2"
+litert-lm = "latest.release"
 
 [libraries]
 glide = {group = "com.github.bumptech.glide", name = "glide", version.ref = "glide"}
@@ -61,6 +62,7 @@ markwon-core = { group = "io.noties.markwon", name = "core", version.ref = "mark
 markwon-strikethrough = { group = "io.noties.markwon", name = "ext-strikethrough", version.ref = "markwon" }
 markwon-tables = { group = "io.noties.markwon", name = "ext-tables", version.ref = "markwon" }
 markwon-linkify = { group = "io.noties.markwon", name = "linkify", version.ref = "markwon" }
+litert-lm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litert-lm" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
