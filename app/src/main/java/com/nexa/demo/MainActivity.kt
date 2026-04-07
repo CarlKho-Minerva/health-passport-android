@@ -123,6 +123,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -1885,10 +1886,6 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                         }
                 }
 
-                else -> {
-                    onLoadModelFailed("model type error")
-                }
-
                 "litert-lm" -> {
                     // Gemma 4 E2B via Google AI Edge LiteRT-LM
                     // The model file is downloaded as a single .litertlm file.
@@ -1906,6 +1903,10 @@ You are a clinical tool, not a replacement for in-person care. Flag when somethi
                     } catch (e: Exception) {
                         onLoadModelFailed("Gemma 4 init failed: ${e.message}")
                     }
+                }
+
+                else -> {
+                    onLoadModelFailed("model type error")
                 }
             }
         }

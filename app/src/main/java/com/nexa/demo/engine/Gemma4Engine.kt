@@ -12,6 +12,7 @@ package com.nexa.demo.engine
 
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
@@ -105,15 +106,16 @@ class Gemma4Engine(
         }
 
         val conversationConfig = ConversationConfig(
-            systemInstruction = buildSystemContent(contextSnippet),
-            samplerConfig = SamplerConfig(topK = 40, topP = 0.95f, temperature = 0.7f),
+            systemInstruction = Contents.of(buildSystemContent(contextSnippet)),
+            samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.7),
         )
 
         eng.createConversation(conversationConfig).use { conversation ->
             conversation.sendMessageAsync(userMessage)
                 .catch { e -> Log.e(TAG, "Stream error: ${e.message}", e); throw e }
                 .collect { message ->
-                    message.text?.let { if (it.isNotEmpty()) emit(it) }
+                    val chunk = message.toString()
+                    if (chunk.isNotEmpty()) emit(chunk)
                 }
         }
     }.flowOn(Dispatchers.IO)
@@ -129,12 +131,12 @@ class Gemma4Engine(
         val eng = checkNotNull(engine) { "Engine not initialised." }
 
         val conversationConfig = ConversationConfig(
-            systemInstruction = buildSystemContent(contextSnippet),
-            samplerConfig = SamplerConfig(topK = 40, topP = 0.95f, temperature = 0.7f),
+            systemInstruction = Contents.of(buildSystemContent(contextSnippet)),
+            samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.7),
         )
 
         eng.createConversation(conversationConfig).use { conversation ->
-            conversation.sendMessage(userMessage).text ?: ""
+            conversation.sendMessage(userMessage).toString()
         }
     }
 
