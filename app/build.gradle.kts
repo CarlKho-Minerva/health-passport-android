@@ -36,8 +36,8 @@ android {
         applicationId = "com.carlkho.healthpassport"
         minSdk = 27
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -83,11 +83,10 @@ android {
 //    }
     packagingOptions {
         jniLibs {
-            // Compress .so files in the APK (safe for minSdk 27+).
-            // With useLegacyPackaging=true the linker stores them UNCOMPRESSED, which makes the
-            // per-device APK download count toward the 200 MB Play Store limit at full size.
-            // Flipping to false compresses them (188 MB → ~75 MB in the APK).
-            useLegacyPackaging = false
+            // Store .so files UNCOMPRESSED (useLegacyPackaging=true) so they can be
+            // memory-mapped at 16KB-aligned offsets. Required by Play Store 16KB page policy.
+            // Compressed .so (false) cannot satisfy the alignment check.
+            useLegacyPackaging = true
             // libstable-diffusion is part of the Nexa SDK AAR but is not used in this app.
             excludes += "**/libstable-diffusion.so"
             // HTP profiling/tracing readers are only needed for SDK development benchmarks.
