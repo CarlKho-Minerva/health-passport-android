@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Health Passport - Investor and Partner Deck</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #070707;
+            --surface: #0d0d0d;
+            --card: #111111;
+            --elevated: #141414;
+            --border: #1a1a1a;
+            --border-card: #1f1f1f;
+            --text-1: #f2f2f2;
+            --text-2: #808080;
+            --text-3: #4d4d4d;
+            --green: #10b981;
+            --cyan: #22d3ee;
+            --amber: #f59e0b;
+            --shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+            background:
+                radial-gradient(circle at top right, rgba(16, 185, 129, 0.12), transparent 28%),
+                radial-gradient(circle at 10% 20%, rgba(34, 211, 238, 0.08), transparent 24%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 15%),
+                var(--bg);
+            color: var(--text-1);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image: linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+            background-size: 80px 80px;
+            mask-image: radial-gradient(circle at center, black 45%, transparent 85%);
+            opacity: 0.4;
+        }
+
+        a { color: var(--green); text-decoration: none; }
+        a:hover { color: var(--cyan); }
+
+        .scroll-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: rgba(255, 255, 255, 0.05);
+            z-index: 30;
+        }
+
+        .scroll-progress-bar {
+            height: 100%;
+            width: 100%;
+            transform-origin: left center;
+            transform: scaleX(0);
+            background: linear-gradient(90deg, var(--green), var(--cyan));
+            box-shadow: 0 0 18px rgba(34, 211, 238, 0.55);
+        }
+
+        nav.top-nav {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 0 1.5rem;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(7, 7, 7, 0.82);
+            backdrop-filter: blur(14px);
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-1);
+        }
+
+        .nav-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, var(--green), var(--cyan));
+            box-shadow: 0 0 18px rgba(16, 185, 129, 0.45);
+            animation: pulse 2.8s ease-in-out infinite;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            color: var(--text-3);
+            font-size: 0.77rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .nav-links a:hover,
+        .nav-links a.active {
+            color: var(--green);
+        }
+
+        .deck-shell {
+            width: min(1180px, calc(100% - 2rem));
+            margin: 0 auto;
+        }
+
+        .slide {
+            position: relative;
+            padding: 5.25rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .slide:last-of-type {
+            border-bottom: none;
+        }
+
+        .hero {
+            min-height: calc(100vh - 56px);
+            display: flex;
+            align-items: center;
+        }
+
+        .hero-grid,
+        .grid-2,
+        .grid-3 {
+            display: grid;
+            gap: 1.25rem;
+        }
+
+        .hero-grid,
+        .grid-2 {
+            grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+            align-items: start;
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .hero-copy {
+            padding-right: 1rem;
+        }
+
+        .pill-row {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.2rem;
+        }
+
+        .hero-tag,
+        .pill,
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            border: 1px solid var(--border-card);
+            background: rgba(17, 17, 17, 0.9);
+            color: var(--green);
+            padding: 0.35rem 0.85rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .pill-muted {
+            color: var(--text-2);
+        }
+
+        .hero h1 {
+            font-size: clamp(2.7rem, 7vw, 5rem);
+            font-weight: 300;
+            letter-spacing: -0.05em;
+            line-height: 0.95;
+            margin-bottom: 1rem;
+            max-width: 11ch;
+        }
+
+        .hero h1 span,
+        .accent {
+            color: var(--green);
+        }
+
+        .hero p.lede {
+            font-size: clamp(1rem, 2.1vw, 1.18rem);
+            color: var(--text-2);
+            max-width: 42rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.8;
+        }
+
+        .hero-note {
+            display: inline-flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            color: var(--text-3);
+            font-size: 0.82rem;
+            margin-bottom: 2rem;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 0.8rem 1.35rem;
+            border-radius: 10px;
+            font-size: 0.86rem;
+            font-weight: 500;
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: var(--green);
+            color: #000;
+            border: 1px solid var(--green);
+        }
+
+        .btn-primary:hover {
+            background: #0ea872;
+            color: #000;
+        }
+
+        .btn-ghost {
+            background: rgba(255, 255, 255, 0.015);
+            color: var(--text-2);
+            border: 1px solid var(--border-card);
+        }
+
+        .btn-ghost:hover {
+            color: var(--text-1);
+            border-color: var(--text-3);
+        }
+
+        .hero-panel,
+        .card,
+        .glass-card,
+        .quote-card,
+        .stack,
+        .support-card,
+        .timeline-card {
+            position: relative;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: linear-gradient(180deg, rgba(20, 20, 20, 0.96), rgba(13, 13, 13, 0.96));
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .hero-panel::before,
+        .glass-card::before,
+        .support-card::before,
+        .timeline-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), transparent 35%, transparent 70%, rgba(34, 211, 238, 0.07));
+            opacity: 0;
+            transition: opacity 0.22s ease;
+        }
+
+        .interactive:hover::before {
+            opacity: 1;
+        }
+
+        .hero-panel {
+            padding: 1rem;
+        }
+
+        .panel-media {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--border-card);
+            background: var(--surface);
+            margin-bottom: 0.95rem;
+        }
+
+        .panel-media img,
+        .media-card img {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .media-glow {
+            position: absolute;
+            inset: auto 0 0 0;
+            height: 45%;
+            background: linear-gradient(180deg, transparent, rgba(7, 7, 7, 0.88));
+        }
+
+        .panel-meta {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.1rem 0.2rem 0.4rem;
+        }
+
+        .panel-meta h3,
+        .card h3,
+        .support-card h3,
+        .timeline-card h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-1);
+        }
+
+        .panel-meta p,
+        .card p,
+        .support-card p,
+        .timeline-card p {
+            color: var(--text-2);
+            font-size: 0.86rem;
+            line-height: 1.7;
+        }
+
+        .metric-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.85rem;
+        }
+
+        .metric-card {
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.015);
+            padding: 0.9rem;
+            min-height: 110px;
+        }
+
+        .metric-card .metric-label,
+        .meta-label,
+        .section-label,
+        .card-label {
+            font-size: 0.7rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-3);
+        }
+
+        .metric-value,
+        .stat-number {
+            display: block;
+            font-size: 1.6rem;
+            line-height: 1;
+            letter-spacing: -0.04em;
+            color: var(--text-1);
+            margin: 0.7rem 0 0.45rem;
+        }
+
+        .metric-card p {
+            font-size: 0.79rem;
+            color: var(--text-2);
+        }
+
+        .section-head {
+            max-width: 760px;
+            margin-bottom: 2rem;
+        }
+
+        .section-head h2 {
+            font-size: clamp(1.8rem, 4vw, 3rem);
+            font-weight: 350;
+            letter-spacing: -0.03em;
+            line-height: 1.05;
+            margin-bottom: 0.8rem;
+        }
+
+        .section-head p {
+            color: var(--text-2);
+            font-size: 1rem;
+            line-height: 1.8;
+        }
+
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .card,
+        .glass-card,
+        .support-card,
+        .timeline-card,
+        .quote-card {
+            padding: 1.25rem;
+        }
+
+        .card {
+            min-height: 230px;
+        }
+
+        .card-label,
+        .meta-label {
+            margin-bottom: 0.75rem;
+        }
+
+        .card h3 {
+            margin-bottom: 0.7rem;
+        }
+
+        .card ul,
+        .support-card ul,
+        .timeline-card ul,
+        .ask-list {
+            list-style: none;
+            margin-top: 1rem;
+            display: grid;
+            gap: 0.6rem;
+        }
+
+        .card li,
+        .support-card li,
+        .timeline-card li,
+        .ask-list li {
+            position: relative;
+            padding-left: 1rem;
+            color: var(--text-2);
+            font-size: 0.85rem;
+        }
+
+        .card li::before,
+        .support-card li::before,
+        .timeline-card li::before,
+        .ask-list li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0.6rem;
+            width: 0.38rem;
+            height: 0.38rem;
+            border-radius: 999px;
+            background: var(--green);
+            box-shadow: 0 0 14px rgba(16, 185, 129, 0.5);
+        }
+
+        .quote-card {
+            margin-top: 1.25rem;
+            display: grid;
+            grid-template-columns: 120px minmax(0, 1fr);
+            gap: 1.25rem;
+            align-items: start;
+        }
+
+        .quote-card strong {
+            display: block;
+            font-size: 2.2rem;
+            line-height: 1;
+            letter-spacing: -0.05em;
+            color: var(--green);
+        }
+
+        .quote-card p {
+            color: var(--text-2);
+            font-size: 0.95rem;
+        }
+
+        .product-layout {
+            display: grid;
+            grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.15fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .media-card {
+            padding: 1rem;
+        }
+
+        .media-card .panel-media {
+            margin-bottom: 1rem;
+        }
+
+        .floating-chip {
+            position: absolute;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(7, 7, 7, 0.88);
+            color: var(--text-1);
+            border-radius: 999px;
+            padding: 0.35rem 0.7rem;
+            font-size: 0.72rem;
+            backdrop-filter: blur(10px);
+            box-shadow: var(--shadow);
+            animation: floatChip 4.4s ease-in-out infinite;
+        }
+
+        .chip-a { top: 1rem; right: 1rem; }
+        .chip-b { bottom: 1rem; left: 1rem; animation-delay: 0.7s; }
+
+        .flow-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
+        }
+
+        .flow-card {
+            position: relative;
+            border: 1px solid var(--border-card);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.015);
+            padding: 1rem;
+            min-height: 170px;
+            overflow: hidden;
+        }
+
+        .flow-card::after {
+            content: '';
+            position: absolute;
+            inset: auto -20% -65% -20%;
+            height: 120px;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.18), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .flow-card:hover::after {
+            opacity: 1;
+        }
+
+        .flow-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            border: 1px solid var(--border-card);
+            color: var(--green);
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .flow-card h3 {
+            margin-bottom: 0.55rem;
+        }
+
+        .flow-card p {
+            font-size: 0.84rem;
+        }
+
+        .subhead {
+            margin: 1.4rem 0 0.8rem;
+            font-size: 0.82rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-3);
+        }
+
+        .stack {
+            overflow: hidden;
+        }
+
+        .stack-row {
+            display: grid;
+            grid-template-columns: minmax(160px, 0.9fr) minmax(0, 1fr) auto;
+            align-items: start;
+            gap: 1rem;
+            padding: 0.95rem 1.15rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stack-row:last-child {
+            border-bottom: none;
+        }
+
+        .stack-name { color: var(--text-1); font-weight: 500; font-size: 0.88rem; }
+        .stack-desc { color: var(--text-2); font-size: 0.82rem; }
+        .stack-meta { color: var(--text-3); font-size: 0.78rem; text-align: right; white-space: nowrap; }
+
+        .proof-grid,
+        .support-grid,
+        .roadmap-grid,
+        .ask-grid,
+        .team-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .proof-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .support-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 1.5rem;
+        }
+
+        .team-grid,
+        .ask-grid,
+        .roadmap-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .proof-card {
+            min-height: 210px;
+        }
+
+        .stat-number {
+            margin-top: 0.55rem;
+        }
+
+        .proof-card .card-label,
+        .support-card .card-label,
+        .timeline-card .card-label {
+            margin-bottom: 0.55rem;
+        }
+
+        .support-card {
+            min-height: 250px;
+        }
+
+        .support-meta {
+            display: inline-flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .support-meta .pill {
+            font-size: 0.66rem;
+            padding: 0.3rem 0.65rem;
+        }
+
+        .support-note {
+            margin-top: 1rem;
+            font-size: 0.74rem;
+            color: var(--text-3);
+        }
+
+        .timeline-card {
+            min-height: 260px;
+        }
+
+        .timeline-card strong {
+            display: block;
+            font-size: 1.05rem;
+            font-weight: 550;
+            margin-bottom: 0.5rem;
+            color: var(--text-1);
+        }
+
+        .timeline-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.09);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--green);
+            font-size: 0.84rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .footer-cta {
+            display: grid;
+            grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.85fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .contact-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 280px;
+        }
+
+        .contact-links {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-top: 1.4rem;
+        }
+
+        .footer-meta {
+            margin-top: 2rem;
+            padding-top: 1.3rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: space-between;
+            color: var(--text-3);
+            font-size: 0.76rem;
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(28px) scale(0.985);
+            transition: opacity 0.65s ease, transform 0.65s ease;
+            transition-delay: var(--delay, 0ms);
+        }
+
+        .reveal.is-visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        .tilt {
+            transform-style: preserve-3d;
+            transition: transform 0.18s ease;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.3); opacity: 1; }
+        }
+
+        @keyframes floatChip {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        @media (max-width: 1040px) {
+            .hero-grid,
+            .grid-2,
+            .product-layout,
+            .footer-cta {
+                grid-template-columns: 1fr;
+            }
+
+            .grid-3,
+            .card-grid,
+            .proof-grid,
+            .support-grid,
+            .roadmap-grid,
+            .ask-grid,
+            .team-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .hero {
+                min-height: auto;
+            }
+
+            .hero-copy {
+                padding-right: 0;
+            }
+        }
+
+        @media (max-width: 720px) {
+            nav.top-nav {
+                height: auto;
+                padding: 0.9rem 1rem;
+                align-items: flex-start;
+                gap: 0.75rem;
+                flex-direction: column;
+            }
+
+            .nav-links {
+                gap: 0.8rem;
+            }
+
+            .slide {
+                padding: 4rem 0;
+            }
+
+            .metric-strip,
+            .flow-grid,
+            .grid-3,
+            .card-grid,
+            .proof-grid,
+            .support-grid,
+            .roadmap-grid,
+            .ask-grid,
+            .team-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stack-row,
+            .quote-card {
+                grid-template-columns: 1fr;
+            }
+
+            .quote-card strong {
+                font-size: 1.8rem;
+            }
+
+            .hero h1 {
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="scroll-progress" aria-hidden="true">
+        <div class="scroll-progress-bar" id="scrollBar"></div>
+    </div>
+
+    <nav class="top-nav">
+        <div class="nav-brand">
+            <span class="nav-dot"></span>
+            <span>Health Passport / Investor Deck</span>
+        </div>
+        <div class="nav-links">
+            <a href="#problem">Problem</a>
+            <a href="#product">Product</a>
+            <a href="#tech">Tech</a>
+            <a href="#proof">Proof</a>
+            <a href="#team">People</a>
+            <a href="#ask">Ask</a>
+        </div>
+    </nav>
+
+    <main class="deck-shell">
+        <section class="slide hero" id="top">
+            <div class="hero-grid">
+                <div class="hero-copy reveal">
+                    <div class="pill-row">
+                        <span class="hero-tag">Qualcomm x Nexa AI Grand Champion</span>
+                        <span class="hero-tag pill-muted">Founders Inc. Canopy</span>
+                    </div>
+                    <h1>Health <span>Passport</span></h1>
+                    <p class="lede">A local-first health memory system that turns scattered medical documents into grounded answers, structured records, and clinic-ready handoffs without sending sensitive data to the cloud.</p>
+                    <div class="hero-note">
+                        <span>Product today: Health Passport</span>
+                        <span>Company direction: Twin</span>
+                        <span>Built for investors, device partners, and design-partner conversations</span>
+                    </div>
+                    <div class="hero-actions">
+                        <a href="https://carlkho-minerva.github.io/health-passport-android/" class="btn btn-primary">Live Product</a>
+                        <a href="https://www.youtube.com/watch?v=2JNhoXNvsCo" class="btn btn-ghost">Watch Demo</a>
+                        <a href="mailto:carl@carlkho.com" class="btn btn-ghost">Contact Carl</a>
+                    </div>
+                    <div class="quote-card reveal" style="--delay: 120ms;">
+                        <strong>Wedge now.</strong>
+                        <div>
+                            <p>Health Passport is the legible near-term product: medical document in, structured health record out, then an agent keeps medications, symptoms, and timeline coherent over time. The broader company becomes Twin once the health memory layer is undeniable.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hero-panel interactive tilt reveal" style="--delay: 140ms;">
+                    <div class="panel-media">
+                        <img src="preview.png" alt="Health Passport live product preview">
+                        <div class="media-glow"></div>
+                    </div>
+                    <div class="panel-meta">
+                        <div>
+                            <h3>On-device medical continuity</h3>
+                            <p>Scan, browse, ask, and hand off the right context from a private health vault running on the phone.</p>
+                        </div>
+                        <span class="status-pill">v1.4 / Gemma 4</span>
+                    </div>
+                    <div class="metric-strip">
+                        <div class="metric-card">
+                            <span class="metric-label">Cloud Uploads</span>
+                            <span class="metric-value stat-number" data-value="0">0</span>
+                            <p>Zero account requirement. Zero server dependency by default.</p>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">First Token</span>
+                            <span class="metric-value"><span class="stat-number" data-value="446">446</span> ms</span>
+                            <p>Measured on Snapdragon 8 Elite for grounded vault Q&amp;A.</p>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">Model Stack</span>
+                            <span class="metric-value"><span class="stat-number" data-value="6">6</span></span>
+                            <p>Gemma 4, OCR, ASR, embeddings, vision, and NPU fallback.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="slide" id="problem">
+            <div class="section-head reveal">
+                <p class="section-label">01 / Problem</p>
+                <h2>Medical continuity breaks exactly when care becomes urgent.</h2>
+                <p>Prescriptions live in camera rolls. Lab reports arrive in different formats and languages. Every new clinic asks the same questions again. Cloud-first health AI makes the privacy trade before the user even gets value.</p>
+            </div>
+
+            <div class="card-grid">
+                <article class="card interactive tilt reveal">
+                    <p class="card-label">Lived Problem</p>
+                    <h3>Globally mobile care is structurally broken.</h3>
+                    <p>The product started from a real workflow: crossing cities and countries, then rebuilding a personal health story from memory while stressed, sleep-deprived, or sick.</p>
+                    <ul>
+                        <li>Photos, PDFs, and prescriptions pile up with no usable structure.</li>
+                        <li>Doctors need context fast, not a pile of screenshots.</li>
+                        <li>Patients end up being the integration layer.</li>
+                    </ul>
+                </article>
+
+                <article class="card interactive tilt reveal" style="--delay: 90ms;">
+                    <p class="card-label">Trust Problem</p>
+                    <h3>Health AI should not default to cloud upload.</h3>
+                    <p>The highest-value records are also the least appropriate to casually ship through third-party APIs and analytics pipelines.</p>
+                    <ul>
+                        <li>Sensitive records should stay on the user's device by default.</li>
+                        <li>Local inference removes the most obvious exposure path.</li>
+                        <li>Privacy is part of the product, not a legal afterthought.</li>
+                    </ul>
+                </article>
+
+                <article class="card interactive tilt reveal" style="--delay: 180ms;">
+                    <p class="card-label">Workflow Problem</p>
+                    <h3>Extraction alone is not enough.</h3>
+                    <p>Scanning a prescription is table stakes. The real job is making records understandable, searchable, and handoff-ready without hallucinating beyond the source material.</p>
+                    <ul>
+                        <li>Grounded Q&amp;A over the user vault.</li>
+                        <li>Timeline and medication coherence across files.</li>
+                        <li>Clinic-ready summaries when context has to move fast.</li>
+                    </ul>
+                </article>
+            </div>
+
+            <div class="quote-card reveal" style="--delay: 220ms;">
+                <strong>Health memory.</strong>
+                <div>
+                    <p>This is the company legibility move: not just 'AI scans medical docs,' but a local-first health memory layer that makes medical context portable, queryable, and useful in the moment care happens.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="slide" id="product">
+            <div class="section-head reveal">
+                <p class="section-label">02 / Product</p>
+                <h2>A private health vault with an interface normal people can actually use.</h2>
+                <p>Health Passport accepts documents, voice, and text. It files records into a structured vault, answers grounded questions about those records, and turns the result into something a clinician can use.</p>
+            </div>
+
+            <div class="product-layout">
+                <article class="glass-card media-card interactive tilt reveal">
+                    <div class="panel-media">
+                        <img src="Rx-sample.png" alt="Example prescription document scanned by Health Passport">
+                        <span class="floating-chip chip-a">Camera -> OCR -> vault</span>
+                        <span class="floating-chip chip-b">Grounded analysis only</span>
+                    </div>
+                    <p class="meta-label">Document sample</p>
+                    <h3>Real-world inputs are messy. The product still has to feel clean.</h3>
+                    <p>Prescriptions, lab reports, receipts, and visit notes get turned into structured health memory instead of staying trapped as dead images.</p>
+                    <p class="subhead">Core promise</p>
+                    <ul class="ask-list">
+                        <li>Medical document in.</li>
+                        <li>Structured local record out.</li>
+                        <li>Grounded answer or handoff generated from that record.</li>
+                    </ul>
+                </article>
+
+                <div class="flow-grid">
+                    <article class="flow-card reveal" style="--delay: 40ms;">
+                        <span class="flow-number">01</span>
+                        <h3>Capture</h3>
+                        <p>Phone camera, uploaded file, or live voice input. No desktop EHR integration is required to get started.</p>
+                    </article>
+                    <article class="flow-card reveal" style="--delay: 90ms;">
+                        <span class="flow-number">02</span>
+                        <h3>Structure</h3>
+                        <p>OCR and reasoning route the content into medications, symptoms, timeline, and body-system context inside a local vault.</p>
+                    </article>
+                    <article class="flow-card reveal" style="--delay: 140ms;">
+                        <span class="flow-number">03</span>
+                        <h3>Ask</h3>
+                        <p>Users query the vault in plain language: current medications, last abnormal lab, what changed since the last visit.</p>
+                    </article>
+                    <article class="flow-card reveal" style="--delay: 190ms;">
+                        <span class="flow-number">04</span>
+                        <h3>Handoff</h3>
+                        <p>The system can turn the same records into compact, clinic-ready summaries instead of generic chat transcripts.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="slide" id="tech">
+            <div class="section-head reveal">
+                <p class="section-label">03 / Tech</p>
+                <h2>This is not a thin wrapper around a model endpoint.</h2>
+                <p>The product advantage is the routing layer, the local health vault, and the grounded on-device stack. Extraction, reasoning, and memory each have a job.</p>
+            </div>
+
+            <div class="grid-2">
+                <div class="reveal">
+                    <div class="stack interactive">
+                        <div class="stack-row">
+                            <div class="stack-name">Gemma 4 E2B</div>
+                            <div class="stack-desc">Primary LLM for grounded health Q&amp;A, explanation, and reasoning over the local vault.</div>
+                            <div class="stack-meta">LiteRT-LM<br>~2.6 GB</div>
+                        </div>
+                        <div class="stack-row">
+                            <div class="stack-name">PaddleOCR</div>
+                            <div class="stack-desc">Fast document extraction from scans and photos on-device.</div>
+                            <div class="stack-meta">Nexa SDK<br>~100 MB</div>
+                        </div>
+                        <div class="stack-row">
+                            <div class="stack-name">Parakeet ASR</div>
+                            <div class="stack-desc">Voice input and clinic transcription without sending audio off the phone.</div>
+                            <div class="stack-meta">Nexa SDK<br>~300 MB</div>
+                        </div>
+                        <div class="stack-row">
+                            <div class="stack-name">EmbedGemma</div>
+                            <div class="stack-desc">Semantic retrieval over the user vault so answers stay grounded in the source files.</div>
+                            <div class="stack-meta">Nexa SDK<br>~300 MB</div>
+                        </div>
+                        <div class="stack-row">
+                            <div class="stack-name">Qwen3-4B / Llama fallback</div>
+                            <div class="stack-desc">Fallback path for devices or flows where NPU acceleration is the better option.</div>
+                            <div class="stack-meta">Nexa SDK<br>~4 GB</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-3" style="grid-template-columns: 1fr;">
+                    <article class="card interactive tilt reveal" style="--delay: 70ms; min-height: 0;">
+                        <p class="card-label">Moat</p>
+                        <h3>Local by default, structured by design.</h3>
+                        <ul>
+                            <li>Markdown-style health vault keeps the record inspectable and portable.</li>
+                            <li>Model routing keeps the reasoning layer tied to real sources.</li>
+                            <li>System is usable on a phone before any enterprise integration exists.</li>
+                        </ul>
+                    </article>
+
+                    <article class="card interactive tilt reveal" style="--delay: 140ms; min-height: 0;">
+                        <p class="card-label">Performance</p>
+                        <ul>
+                            <li>446 ms time to first token on Snapdragon 8 Elite.</li>
+                            <li>OCR scan time under 1 second in the current stack.</li>
+                            <li>Up to 6 local models in the wider routing architecture.</li>
+                        </ul>
+                    </article>
+
+                    <article class="card interactive tilt reveal" style="--delay: 210ms; min-height: 0;">
+                        <p class="card-label">Why now</p>
+                        <ul>
+                            <li>Gemma 4 sharpens the reasoning and handoff layer, not just extraction.</li>
+                            <li>On-device inference is finally strong enough to feel product-grade.</li>
+                            <li>The user benefit is immediate even before clinical integrations exist.</li>
+                        </ul>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="slide" id="proof">
+            <div class="section-head reveal">
+                <p class="section-label">04 / Proof</p>
+                <h2>The proof is already unusually concrete for a student-led health startup.</h2>
+                <p>The deck does not need to pretend this is further along than it is. The current advantage is real product proof, real technical depth, and real people already leaning in.</p>
+            </div>
+
+            <div class="proof-grid">
+                <article class="card proof-card interactive tilt reveal">
+                    <p class="card-label">Validation</p>
+                    <span class="stat-number">$6.5k</span>
+                    <h3>Qualcomm x Nexa AI Grand Champion</h3>
+                    <p>Health Passport won the on-device bounty and already has a public demo and distribution story.</p>
+                </article>
+
+                <article class="card proof-card interactive tilt reveal" style="--delay: 70ms;">
+                    <p class="card-label">Distribution</p>
+                    <span class="stat-number">Live</span>
+                    <h3>Play Store + GitHub Pages presence</h3>
+                    <p>The product already exists as a public app and a public demo page rather than just a concept deck.</p>
+                </article>
+
+                <article class="card proof-card interactive tilt reveal" style="--delay: 140ms;">
+                    <p class="card-label">Expansion</p>
+                    <span class="stat-number">Desktop</span>
+                    <h3>Companion workflow already in motion</h3>
+                    <p>The wedge extends cleanly into desktop health memory and longer-form document workflows.</p>
+                </article>
+
+                <article class="card proof-card interactive tilt reveal" style="--delay: 210ms;">
+                    <p class="card-label">Narrative</p>
+                    <span class="stat-number">AHA</span>
+                    <h3>MIT Media Lab / AHA feature is public</h3>
+                    <p>The broader founder story now has public receipts beyond the bounty itself.</p>
+                </article>
+            </div>
+
+            <div class="quote-card reveal" style="--delay: 250ms;">
+                <strong>Legible now.</strong>
+                <div>
+                    <p>The company becomes much easier to understand once Health Passport is framed as the near-term wedge and the broader health-memory company as the next layer, not the first sentence.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="slide" id="team">
+            <div class="section-head reveal">
+                <p class="section-label">05 / People</p>
+                <h2>Founder-led, technically vertical, and already surrounded by the right support network.</h2>
+                <p>The deck needs to show both who is building and who is helping open doors. This is team plus momentum, not fake headcount.</p>
+            </div>
+
+            <div class="team-grid">
+                <article class="timeline-card interactive tilt reveal">
+                    <span class="timeline-number">01</span>
+                    <p class="card-label">Founder</p>
+                    <strong>Carl Kho</strong>
+                    <p>Product, design, Android, AI routing, and the underlying health-vault workflow. Minerva University '26. Built the current product from the lived problem outward.</p>
+                    <ul>
+                        <li>Ships across product, interface, and model stack.</li>
+                        <li>Already took the app through public demo and distribution.</li>
+                        <li>Using Health Passport as the startup wedge, not just a class artifact.</li>
+                    </ul>
+                </article>
+
+                <article class="timeline-card interactive tilt reveal" style="--delay: 90ms;">
+                    <span class="timeline-number">02</span>
+                    <p class="card-label">Technical Partner</p>
+                    <strong>Dain Kim</strong>
+                    <p>Embedded systems and firmware collaborator on the wider Somach / biosignal interface roadmap, which later feeds into the broader Twin direction.</p>
+                    <ul>
+                        <li>ESP32 firmware and signal-processing depth.</li>
+                        <li>Future bridge from software wedge to biosignal input.</li>
+                        <li>Helps keep the broader company arc credible.</li>
+                    </ul>
+                </article>
+
+                <article class="timeline-card interactive tilt reveal" style="--delay: 180ms;">
+                    <span class="timeline-number">03</span>
+                    <p class="card-label">Advisor</p>
+                    <strong>Patrick Watson</strong>
+                    <p>Research guidance and technical seriousness across the capstone-to-company arc. Strongest role here is intellectual and founder development, not just supervision.</p>
+                    <ul>
+                        <li>Helped shape the hardware-to-software research path.</li>
+                        <li>Grounded the work in real neuroscience and engineering discipline.</li>
+                        <li>Useful signal for technical credibility with outside partners.</li>
+                    </ul>
+                </article>
+            </div>
+
+            <div class="support-grid">
+                <article class="support-card interactive tilt reveal">
+                    <p class="card-label">Device + ecosystem support</p>
+                    <h3>Qualcomm / Nexa orbit</h3>
+                    <p>The product already has on-device validation through the bounty, ongoing device support conversations, and a direct line into the ecosystem that made the first version possible.</p>
+                    <div class="support-meta">
+                        <span class="pill">Manoj Khilnani</span>
+                        <span class="pill">Qualcomm</span>
+                    </div>
+                </article>
+
+                <article class="support-card interactive tilt reveal" style="--delay: 70ms;">
+                    <p class="card-label">Founder program</p>
+                    <h3>Founders Inc. Canopy</h3>
+                    <p>Canopy is the current founder environment for making the company legible, converting the health-memory wedge into a real startup story, and unlocking operator intros.</p>
+                    <div class="support-meta">
+                        <span class="pill">Adrianna</span>
+                        <span class="pill">SF ecosystem</span>
+                    </div>
+                </article>
+
+                <article class="support-card interactive tilt reveal" style="--delay: 140ms;">
+                    <p class="card-label">Investor feedback</p>
+                    <h3>Warm venture conversations</h3>
+                    <p>There is already active investor feedback in motion around the startup framing, including continuing conversations in San Francisco instead of a cold start.</p>
+                    <div class="support-meta">
+                        <span class="pill">Heyu Huang</span>
+                        <span class="pill">Pier Ventures</span>
+                    </div>
+                </article>
+
+                <article class="support-card interactive tilt reveal" style="--delay: 210ms;">
+                    <p class="card-label">Legal runway</p>
+                    <h3>Fowler / UC San Diego support</h3>
+                    <p>Post-Fowler momentum turned into meaningful founder infrastructure: stronger venture framing, legal-support access, and a cleaner path for company setup questions.</p>
+                    <div class="support-meta">
+                        <span class="pill">Up to ~$25k</span>
+                        <span class="pill">Legal clinic / opinions</span>
+                    </div>
+                </article>
+
+                <article class="support-card interactive tilt reveal" style="--delay: 280ms;">
+                    <p class="card-label">Technical narrative</p>
+                    <h3>Somach keeps the long arc credible</h3>
+                    <p>The wider company story is not fabricated out of branding. Health Passport is the software wedge, and Somach remains the later biosignal input layer rather than being discarded.</p>
+                    <div class="support-meta">
+                        <span class="pill">Future input layer</span>
+                        <span class="pill">Twin direction</span>
+                    </div>
+                </article>
+
+                <article class="support-card interactive tilt reveal" style="--delay: 350ms;">
+                    <p class="card-label">Important caveat</p>
+                    <h3>Support network, not inflated cap table theater</h3>
+                    <p>This section intentionally describes real advisors, programs, device partners, and investor conversations without implying formal investment or customer commitments that do not yet exist.</p>
+                    <p class="support-note">That makes the story stronger, not weaker.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="slide" id="roadmap">
+            <div class="section-head reveal">
+                <p class="section-label">06 / Roadmap</p>
+                <h2>Health Passport is the wedge. Twin is the company arc.</h2>
+                <p>The smartest version of the story does not rename the product too early. It uses the existing Health Passport proof, then shows how that expands into a broader local-first health memory company.</p>
+            </div>
+
+            <div class="roadmap-grid">
+                <article class="timeline-card interactive tilt reveal">
+                    <span class="timeline-number">Now</span>
+                    <strong>Health Passport</strong>
+                    <p>Phone-native product for document capture, vault building, and grounded medical Q&amp;A.</p>
+                    <ul>
+                        <li>Scan prescriptions, labs, and visit notes.</li>
+                        <li>Grounded answers over a local health vault.</li>
+                        <li>Real device + app distribution proof already exists.</li>
+                    </ul>
+                </article>
+
+                <article class="timeline-card interactive tilt reveal" style="--delay: 90ms;">
+                    <span class="timeline-number">Next</span>
+                    <strong>Handoff + continuity layer</strong>
+                    <p>Make the vault truly portable across people and contexts, not just searchable inside the app.</p>
+                    <ul>
+                        <li>Doctor handoff summaries.</li>
+                        <li>Multilingual explanations and rewriting.</li>
+                        <li>Desktop and longer-form document workflows.</li>
+                    </ul>
+                </article>
+
+                <article class="timeline-card interactive tilt reveal" style="--delay: 180ms;">
+                    <span class="timeline-number">Later</span>
+                    <strong>Twin</strong>
+                    <p>The broader company becomes a borderless health memory system where Health Passport is the first product and Somach is a later input layer.</p>
+                    <ul>
+                        <li>Local-first health memory as the platform core.</li>
+                        <li>Biosignal input once the memory layer is strong.</li>
+                        <li>Much better story than leading with sci-fi too early.</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <section class="slide" id="ask">
+            <div class="section-head reveal">
+                <p class="section-label">07 / Ask</p>
+                <h2>What I want from this room.</h2>
+                <p>This deck is built to work in investor meetings, device-partner conversations, Founders Inc. intros, and legal-clinic discussions without changing the underlying company story.</p>
+            </div>
+
+            <div class="footer-cta">
+                <article class="timeline-card contact-card interactive tilt reveal">
+                    <div>
+                        <p class="card-label">Immediate asks</p>
+                        <strong>Design partners, device partners, and early conviction.</strong>
+                        <ul class="ask-list">
+                            <li>2 to 3 design partners with cross-border, chronic-care, or dense record-management workflows.</li>
+                            <li>Device and on-device model partners who can help make local inference feel truly product-grade.</li>
+                            <li>Investor and operator feedback on the wedge, not pressure to overstate maturity.</li>
+                            <li>Legal guidance on privacy boundaries, company setup, and the right first-risk posture.</li>
+                        </ul>
+                    </div>
+                    <div class="contact-links">
+                        <a href="https://carlkho-minerva.github.io/health-passport-android/" class="btn btn-primary">Open Product</a>
+                        <a href="https://github.com/CarlKho-Minerva/health-passport-android" class="btn btn-ghost">GitHub</a>
+                    </div>
+                </article>
+
+                <article class="timeline-card contact-card interactive tilt reveal" style="--delay: 110ms;">
+                    <div>
+                        <p class="card-label">Contact</p>
+                        <strong>Carl Kho</strong>
+                        <p>Founder building local-first health memory now, with a broader biosignal interface roadmap behind it.</p>
+                        <ul>
+                            <li>carl@carlkho.com</li>
+                            <li>https://carlkho.com</li>
+                            <li>https://www.linkedin.com/in/carlkho</li>
+                        </ul>
+                    </div>
+                    <div class="contact-links">
+                        <a href="mailto:carl@carlkho.com" class="btn btn-ghost">Email</a>
+                        <a href="https://www.linkedin.com/in/carlkho" class="btn btn-ghost">LinkedIn</a>
+                    </div>
+                </article>
+            </div>
+
+            <div class="footer-meta reveal" style="--delay: 160ms;">
+                <span>Health Passport pitch deck built as a standalone HTML page from the product site's visual system.</span>
+                <span>Best current story: Health Passport now, Twin as the broader company direction.</span>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const reveals = document.querySelectorAll('.reveal');
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+                entry.target.classList.add('is-visible');
+                observer.unobserve(entry.target);
+            });
+        }, { threshold: 0.14, rootMargin: '0px 0px -8% 0px' });
+
+        reveals.forEach((element) => observer.observe(element));
+
+        const progressBar = document.getElementById('scrollBar');
+        const updateProgress = () => {
+            const scrollTop = window.scrollY;
+            const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+            const progress = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
+            progressBar.style.transform = `scaleX(${Math.min(Math.max(progress, 0), 1)})`;
+        };
+
+        window.addEventListener('scroll', updateProgress, { passive: true });
+        updateProgress();
+
+        const animatedStats = document.querySelectorAll('.stat-number[data-value]');
+        const animateStat = (element) => {
+            const target = Number(element.dataset.value || '0');
+            const duration = 900;
+            const startTime = performance.now();
+            const startValue = 0;
+
+            const tick = (now) => {
+                const elapsed = now - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                const value = Math.round(startValue + (target - startValue) * eased);
+                element.textContent = String(value);
+                if (progress < 1) {
+                    requestAnimationFrame(tick);
+                }
+            };
+
+            requestAnimationFrame(tick);
+        };
+
+        const statObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+                animateStat(entry.target);
+                statObserver.unobserve(entry.target);
+            });
+        }, { threshold: 0.6 });
+
+        animatedStats.forEach((element) => statObserver.observe(element));
+
+        const tiltCards = document.querySelectorAll('.tilt');
+        tiltCards.forEach((card) => {
+            card.addEventListener('mousemove', (event) => {
+                const rect = card.getBoundingClientRect();
+                const x = (event.clientX - rect.left) / rect.width;
+                const y = (event.clientY - rect.top) / rect.height;
+                const rotateY = (x - 0.5) * 8;
+                const rotateX = (0.5 - y) * 8;
+                card.style.transform = `perspective(1200px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-2px)`;
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = '';
+            });
+        });
+
+        const sections = document.querySelectorAll('main section[id]');
+        const navLinks = document.querySelectorAll('.nav-links a');
+        const activateSection = () => {
+            let current = '';
+            sections.forEach((section) => {
+                const top = section.getBoundingClientRect().top;
+                if (top <= 150) {
+                    current = section.id;
+                }
+            });
+
+            navLinks.forEach((link) => {
+                const isActive = link.getAttribute('href') === `#${current}`;
+                link.classList.toggle('active', isActive);
+            });
+        };
+
+        window.addEventListener('scroll', activateSection, { passive: true });
+        activateSection();
+    </script>
+</body>
+</html>

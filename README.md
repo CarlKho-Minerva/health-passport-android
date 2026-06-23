@@ -1,13 +1,15 @@
 # Health Passport
 
-> **Grand Champion — Qualcomm × Nexa AI On-Device Bounty ($6,500)** · Apr 2026  
-> **Gemma 4 Good Hackathon (Google DeepMind)** · May 2026
+> **Grand Champion — Qualcomm × Nexa AI On-Device Bounty ($6,500)** · Apr 2026
+> **Google H2S Semifinalist**
 
-Privacy-first medical records on your phone. Talk, scan, or type — AI models run entirely on-device. No internet. No cloud. No HIPAA liability.
+Local-first health memory on your phone, with a new desktop demo for richer review and handoff. Talk, scan, or type — the Android app runs entirely on-device.
 
 **v1.4 — Gemma 4 E2B (Google AI Edge LiteRT-LM)** is now the primary LLM, replacing Nexa SDK's Qwen3-4B for health Q&A and reasoning.
 
 [![Health Passport — GitHub Pages](docs/preview.png)](https://carlkho-minerva.github.io/health-passport-android/)
+
+[Desktop Demo](https://www.youtube.com/watch?v=nOmOFmkr5FY) · [Google Play](https://play.google.com/store/apps/details?id=com.carlkho.healthpassport) · [Somach Deck](https://somach.vercel.app/projects/health-passport/slides.html) · [Google H2S Deck](https://docs.google.com/presentation/d/1DLgy1nI2aO-iPBa0qkYUXplq36C5u0pRda9_bHDLgfk/edit?usp=sharing)
 
 ---
 
@@ -137,7 +139,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ## Demo
 
-[carlkho-minerva.github.io/health-passport-android](https://carlkho-minerva.github.io/health-passport-android/)
+- [GitHub Pages](https://carlkho-minerva.github.io/health-passport-android/)
+- [Desktop Demo](https://www.youtube.com/watch?v=nOmOFmkr5FY)
+- [Google Play](https://play.google.com/store/apps/details?id=com.carlkho.healthpassport)
+- [Somach Deck](https://somach.vercel.app/projects/health-passport/slides.html)
 
 ---
 
